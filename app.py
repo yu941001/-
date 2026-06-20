@@ -6,9 +6,15 @@ import socket
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 
+from init_db import init_database
+
 
 BASE_DIR = Path(__file__).resolve().parent
 INDEX_FILE = BASE_DIR / 'index.html'
+
+
+def ensure_database_ready():
+    init_database()
 
 def get_db_connection():
     conn = sqlite3.connect('health_system.db')
@@ -190,6 +196,8 @@ class RecommendationAPIHandler(BaseHTTPRequestHandler):
 def run_server(port=None):
     if port is None:
         port = int(os.environ.get('PORT', '5000'))
+
+    ensure_database_ready()
 
     server_address = ('0.0.0.0', port)
     httpd = HTTPServer(server_address, RecommendationAPIHandler)

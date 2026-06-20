@@ -1,8 +1,13 @@
 import sqlite3
+from pathlib import Path
+
+
+BASE_DIR = Path(__file__).resolve().parent
+DB_PATH = BASE_DIR / 'health_system.db'
 
 def init_database():
     # 建立或連接到資料庫檔案
-    conn = sqlite3.connect('health_system.db')
+    conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
 
     # 1. 開啟外鍵限制（確保資料關聯性）
