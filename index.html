@@ -1,0 +1,465 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>✨ 專屬於你的個人保健產品推薦 ✨</title>
+    <style>
+        :root {
+            /* 多巴胺活力色系配方 */
+            --bg-gradient: linear-gradient(135deg, #ffeef8 0%, #e6f0ff 100%);
+            --card-bg: #ffffff;
+            --primary-pink: #ff4081;
+            --primary-orange: #ff6f00;
+            --primary-cyan: #00e5ff;
+            --btn-gradient: linear-gradient(90deg, #ff4081 0%, #ff6f00 100%);
+            --btn-hover: linear-gradient(90deg, #e040fb 0%, #ff3d00 100%);
+            --text-color: #2c3e50;
+            --text-light: #7f8c8d;
+            --shadow: 0 10px 30px rgba(255, 64, 129, 0.1);
+            --radius: 20px;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif, "Microsoft JhengHei";
+        }
+
+        body {
+            background: var(--bg-gradient);
+            color: var(--text-color);
+            line-height: 1.6;
+            padding: 50px 20px;
+            min-height: 100vh;
+        }
+
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+        }
+
+        header {
+            text-align: center;
+            margin-bottom: 40px;
+        }
+
+        header h1 {
+            background: var(--btn-gradient);
+            background-clip: text;
+            -webkit-background-clip: text;
+            color: transparent;
+            -webkit-text-fill-color: transparent;
+            font-size: 2.6rem;
+            margin-bottom: 12px;
+            font-weight: 800;
+            filter: drop-shadow(2px 2px 4px rgba(0,0,0,0.05));
+        }
+
+        header p {
+            color: #64748b;
+            font-size: 1.2rem;
+            font-weight: 500;
+        }
+
+        /* 驚艷的多巴胺卡表單 */
+        .search-card {
+            background: var(--card-bg);
+            border-radius: var(--radius);
+            padding: 40px;
+            box-shadow: var(--shadow);
+            margin-bottom: 30px;
+            border: 3px solid #ffeb3b; /* 撞色黃邊框 */
+        }
+
+        .form-group {
+            margin-bottom: 30px;
+        }
+
+        .form-group label {
+            display: block;
+            font-weight: 700;
+            margin-bottom: 12px;
+            color: #1e293b;
+            font-size: 1.2rem;
+        }
+
+        /* 性別單選鈕特製 (Radio 撞色按鈕樣式) */
+        .radio-group {
+            display: flex;
+            gap: 15px;
+        }
+
+        .radio-label {
+            flex: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: #fff9db; /* 明亮黃底 */
+            border: 2px solid #ffd43b;
+            padding: 14px;
+            border-radius: 12px;
+            cursor: pointer;
+            font-weight: 600;
+            transition: all 0.2s ease;
+        }
+
+        .radio-label input {
+            display: none; /* 隱藏原本醜醜的圓圈 */
+        }
+
+        .radio-label.selected {
+            background: #ff4081; /* 選中變成活力粉 */
+            color: white;
+            border-color: #ff4081;
+            transform: scale(1.03);
+            box-shadow: 0 5px 15px rgba(255, 64, 129, 0.3);
+        }
+
+        input[type="number"] {
+            width: 100%;
+            padding: 14px;
+            border: 2.5px solid #e2e8f0;
+            border-radius: 12px;
+            font-size: 1.1rem;
+            outline: none;
+            transition: border-color 0.3s;
+            font-weight: 600;
+            background: #f8fafc;
+        }
+
+        input[type="number"]:focus {
+            border-color: #ff4081;
+            background: #ffffff;
+        }
+
+        /* 繽紛的多選格點 (Checkbox Grid) */
+        .options-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+            gap: 12px;
+            margin-top: 8px;
+        }
+
+        .checkbox-label {
+            display: flex;
+            align-items: center;
+            background: #f1f5f9;
+            border: 2px solid #e2e8f0;
+            padding: 14px;
+            border-radius: 12px;
+            cursor: pointer;
+            user-select: none;
+            transition: all 0.2s ease;
+            font-size: 1rem;
+            font-weight: 600;
+        }
+
+        .checkbox-label input {
+            margin-right: 10px;
+            accent-color: var(--primary-pink);
+            width: 18px;
+            height: 18px;
+        }
+
+        /* 不同的區塊懸停有不同的多巴胺撞色效果 */
+        #habits-grid .checkbox-label:hover {
+            background: #e3fafc; /* 輕快藍 */
+            border-color: #00e5ff;
+        }
+
+        #conditions-grid .checkbox-label:hover {
+            background: #fff0f6; /* 甜美粉 */
+            border-color: #ff4081;
+        }
+
+        #history-grid .checkbox-label:hover {
+            background: #fff9db; /* 活力黃 */
+            border-color: #ffaa00;
+        }
+
+        /* 多巴胺漸層炫彩大按鈕 */
+        .btn-submit {
+            display: block;
+            width: 100%;
+            background: var(--btn-gradient);
+            color: white;
+            border: none;
+            padding: 18px;
+            font-size: 1.3rem;
+            font-weight: 700;
+            border-radius: 14px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            box-shadow: 0 8px 25px rgba(255, 64, 129, 0.3);
+            text-align: center;
+            letter-spacing: 2px;
+        }
+
+        .btn-submit:hover {
+            background: var(--btn-hover);
+            transform: translateY(-3px);
+            box-shadow: 0 12px 30px rgba(255, 64, 129, 0.4);
+        }
+
+        /* 推薦結果大秀場 */
+        .result-section {
+            display: none;
+            animation: popIn 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+        }
+
+        @keyframes popIn {
+            0% { transform: scale(0.9); opacity: 0; }
+            100% { transform: scale(1); opacity: 1; }
+        }
+
+        .info-bar {
+            background: linear-gradient(90deg, #ff4081, #00e5ff);
+            padding: 20px;
+            border-radius: var(--radius);
+            margin-bottom: 30px;
+            color: white;
+            box-shadow: var(--shadow);
+        }
+
+        .info-bar h3 {
+            font-size: 1.4rem;
+            margin-bottom: 5px;
+            font-weight: 800;
+        }
+
+        .product-list {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+
+        .product-card {
+            background: var(--card-bg);
+            border-radius: var(--radius);
+            padding: 30px;
+            box-shadow: var(--shadow);
+            border: 3px solid #e2e8f0;
+            position: relative;
+            transition: all 0.3s ease;
+        }
+
+        /* 前三名耀眼多巴胺炫色框 */
+        .product-card.rank-0 { border-color: #ffcc00; background: #fffdf5; } 
+        .product-card.rank-1 { border-color: #00e5ff; background: #fafaff; } 
+        .product-card.rank-2 { border-color: #ff4081; background: #fff5f8; } 
+
+        .score-badge {
+            position: absolute;
+            top: 30px;
+            right: 30px;
+            background: #ff4081;
+            color: white;
+            padding: 6px 16px;
+            border-radius: 30px;
+            font-weight: 800;
+            font-size: 0.95rem;
+            box-shadow: 0 4px 10px rgba(255,64,129,0.2);
+        }
+
+        .product-name {
+            font-size: 1.4rem;
+            font-weight: 800;
+            margin-bottom: 15px;
+            color: #1e293b;
+        }
+
+        .reason-tag {
+            display: inline-block;
+            background: #ffffff;
+            color: #ff6f00;
+            padding: 8px 14px;
+            border-radius: 10px;
+            font-size: 0.92rem;
+            margin-right: 8px;
+            margin-bottom: 8px;
+            font-weight: 700;
+            border: 2px solid #ffe0b2;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.02);
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <header>
+        <h1>✨ 專屬於你的個人保健產品推薦 ✨</h1>
+        <p>結合季節、性別、習慣與歷史健康為你解鎖最佳補充方案</p>
+    </header>
+
+    <div class="search-card">
+        <div class="form-group">
+            <label>您的性別</label>
+            <div class="radio-group">
+                <label class="radio-label">
+                    <input type="radio" name="gender" value="男" checked> 🙋‍♂️ 男生
+                </label>
+                <label class="radio-label">
+                    <input type="radio" name="gender" value="女"> 🙋‍♀️ 女生
+                </label>
+            </div>
+        </div>
+
+        <div class="form-group">
+            <label for="age">您的年齡</label>
+            <input type="number" id="age" min="0" max="120" value="25">
+        </div>
+
+        <div class="form-group">
+            <label>🌈 生活習慣（可多選）</label>
+            <div class="options-grid" id="habits-grid">
+                <label class="checkbox-label"><input type="checkbox" value="外食">🍱 外食族</label>
+                <label class="checkbox-label"><input type="checkbox" value="熬夜">🦉 經常熬夜</label>
+                <label class="checkbox-label"><input type="checkbox" value="壓力大">💥 工作壓力大</label>
+                <label class="checkbox-label"><input type="checkbox" value="少運動">🪑 久坐少運動</label>
+                <label class="checkbox-label"><input type="checkbox" value="勞力工作">🏃‍♂️ 重體力/久站</label>
+            </div>
+        </div>
+
+        <div class="form-group">
+            <label>⚡ 目前的健康困擾（可多選）</label>
+            <div class="options-grid" id="conditions-grid">
+                <label class="checkbox-label"><input type="checkbox" value="容易疲勞">🥱 容易疲勞</label>
+                <label class="checkbox-label"><input type="checkbox" value="免疫力低下">🤒 常感冒/免疫差</label>
+                <label class="checkbox-label"><input type="checkbox" value="排便不順">🚽 排便不順暢</label>
+                <label class="checkbox-label"><input type="checkbox" value="過敏體質">🤧 季節性過敏</label>
+                <label class="checkbox-label"><input type="checkbox" value="三高風險">🩸 關心三高風險</label>
+                <label class="checkbox-label"><input type="checkbox" value="關節不適">🦴 關節不適/卡卡</label>
+            </div>
+        </div>
+
+        <div class="form-group">
+            <label>📜 歷史健康紀錄/過去曾有（可多選）</label>
+            <div class="options-grid" id="history-grid">
+                <label class="checkbox-label"><input type="checkbox" value="胃潰瘍/胃炎">🤢 胃潰瘍/胃炎</label>
+                <label class="checkbox-label"><input type="checkbox" value="心血管疾病">❤️ 心血管相關</label>
+                <label class="checkbox-label"><input type="checkbox" value="慢性過敏">🌾 慢性過敏史</label>
+                <label class="checkbox-label"><input type="checkbox" value="經常性腹瀉">🌪️ 經常性腹瀉</label>
+            </div>
+        </div>
+
+        <button class="btn-submit" onclick="getRecommendations()">解鎖我的專屬推薦 🚀</button>
+    </div>
+
+    <div class="result-section" id="result-section">
+        <div class="info-bar">
+            <h3 id="current-month-title">📊 系統環境雷達</h3>
+            <p id="seasonal-diseases-text">正在對接五大官網疾病環境數據...</p>
+        </div>
+
+        <h2 style="font-weight: 800; color: #1e293b; margin-bottom: 15px;">🌟 繽紛調配！最適合你的補給排行</h2>
+        <div class="product-list" id="product-list-container">
+            </div>
+    </div>
+</div>
+
+<script>
+    const API_URL = window.location.protocol.startsWith('http')
+        ? '/api/recommend'
+        : 'http://127.0.0.1:5000/api/recommend';
+
+    document.querySelectorAll('input[name="gender"]').forEach(input => {
+        input.addEventListener('change', () => {
+            document.querySelectorAll('.radio-label').forEach(label => label.classList.remove('selected'));
+            input.closest('.radio-label').classList.add('selected');
+        });
+    });
+
+    document.querySelector('input[name="gender"]:checked')?.closest('.radio-label')?.classList.add('selected');
+
+    async function getRecommendations() {
+        const age = document.getElementById('age').value;
+        const gender = document.querySelector('input[name="gender"]:checked').value;
+        
+        const habits = [];
+        document.querySelectorAll('#habits-grid input:checked').forEach(cb => habits.push(cb.value));
+        
+        const conditions = [];
+        document.querySelectorAll('#conditions-grid input:checked').forEach(cb => conditions.push(cb.value));
+
+        // 蒐集新欄位：歷史疾病
+        const history = [];
+        document.querySelectorAll('#history-grid input:checked').forEach(cb => history.push(cb.value));
+
+        // 打包傳給後端（後端會收到所有參數，即便目前演算法主要對比年齡、習慣與症狀，也可以預留未來擴充）
+        const requestBody = { 
+            age: age, 
+            gender: gender, 
+            habits: habits, 
+            conditions: conditions,
+            history: history
+        };
+
+        try {
+            const response = await fetch(API_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(requestBody)
+            });
+
+            if (!response.ok) {
+                alert('後端伺服器沒有回應，請確認 app.py 是否順利執行中！');
+                return;
+            }
+
+            const data = await response.json();
+            displayResults(data, gender);
+
+        } catch (error) {
+            console.error('Error:', error);
+            alert('無法連上後端，請確認終端機裡的 python app.py 已經按 Play 鍵啟動囉！');
+        }
+    }
+
+    function displayResults(data, gender) {
+        document.getElementById('result-section').style.display = 'block';
+        
+        const genderIcon = gender === '男' ? '🙋‍♂️' : '🙋‍♀️';
+        document.getElementById('current-month-title').innerText = `⚡ 系統成功解碼：目前為 ${data.current_month} 月份 (${genderIcon} 專屬調配中)`;
+        
+        if(data.detected_seasonal_diseases.length > 0) {
+            document.getElementById('seasonal-diseases-text').innerText = `🚨 當季環境高風險：${data.detected_seasonal_diseases.join('、')}。系統已自動提高預防型保健食品的權重！`;
+        } else {
+            document.getElementById('seasonal-diseases-text').innerText = `✨ 本月環境狀態良好，無特殊常態流行傳染病警訊。`;
+        }
+
+        const container = document.getElementById('product-list-container');
+        container.innerHTML = '';
+
+        if(data.recommendations.length === 0) {
+            container.innerHTML = `<p style="color: var(--text-light); text-align: center; padding: 30px; font-weight:600;">目前沒有特別匹配的品項評分。多勾選幾項生活習慣、困擾或歷史紀錄試試看吧！🌈</p>`;
+            return;
+        }
+
+        data.recommendations.forEach((item, index) => {
+            const card = document.createElement('div');
+            card.className = `product-card rank-${index}`;
+            
+            let reasonsHTML = '';
+            item.reasons.forEach(reason => {
+                reasonsHTML += `<span class="reason-tag">${reason}</span>`;
+            });
+
+            card.innerHTML = `
+                <span class="score-badge">活力指數: ${item.final_score} 分</span>
+                <div class="product-name">✨ TOP ${index + 1}：${item.product_name}</div>
+                <div class="product-reasons">
+                    ${reasonsHTML}
+                </div>
+            `;
+            
+            container.appendChild(card);
+        });
+
+        document.getElementById('result-section').scrollIntoView({ behavior: 'smooth' });
+    }
+</script>
+
+</body>
+</html>
