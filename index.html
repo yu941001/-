@@ -404,7 +404,8 @@
             });
 
             if (!response.ok) {
-                alert('後端伺服器沒有回應，請確認 app.py 是否順利執行中！');
+                const errorText = await response.text();
+                alert(`後端伺服器回傳 ${response.status}：${errorText}`);
                 return;
             }
 

@@ -29,6 +29,15 @@ def get_local_ip():
 
 class RecommendationAPIHandler(BaseHTTPRequestHandler):
 
+    def _send_json(self, status_code, payload):
+        body = json.dumps(payload, ensure_ascii=False).encode('utf-8')
+        self.send_response(status_code)
+        self.send_header('Content-Type', 'application/json; charset=utf-8')
+        self.send_header('Content-Length', str(len(body)))
+        self.send_header('Access-Control-Allow-Origin', '*')
+        self.end_headers()
+        self.wfile.write(body)
+
     def _set_html_headers(self, status=200):
         self.send_response(status)
         self.send_header('Content-Type', 'text/html; charset=utf-8')
@@ -58,30 +67,38 @@ class RecommendationAPIHandler(BaseHTTPRequestHandler):
 
     def do_OPTIONS(self):
         """處理瀏覽器的預檢請求（Preflight Request）"""
-        self._set_cors_headers()
+        self.send_response(204)
+        self.send_header('Access-Control-Allow-Origin', '*')
+        self.send_header('Access-Control-Allow-Methods', 'POST, OPTIONS')
+        self.send_header('Access-Control-Allow-Headers', 'Content-Type')
+        self.end_headers()
 
     def do_POST(self):
         """處理前端傳送過來的資料，並計算推薦結果"""
         if self.path == '/api/recommend':
-            # 1. 讀取前端傳來的 JSON 資料
-            content_length = int(self.headers['Content-Length'])
-            post_data = self.rfile.read(content_length)
-            user_input = json.loads(post_data.decode('utf-8'))
-            
-            user_age = int(user_input.get('age', 0))
-            user_habits = user_input.get('habits', [])        # 應該是一個列表, 例如 ["外食", "熬夜"]
-            user_conditions = user_input.get('conditions', []) # 應該是一個列表, 例如 ["容易疲勞"]
-            user_history = user_input.get('history', [])
-            
-            # 2. 計算推薦
-            recommend_results = self.calculate_recommendations(user_age, user_habits, user_conditions, user_history)
-            
-            # 3. 回傳 JSON 結果給前端
-            self._set_cors_headers()
-            self.wfile.write(json.dumps(recommend_results, ensure_ascii=False).encode('utf-8'))
+            try:
+                # 1. 讀取前端傳來的 JSON 資料
+                content_length = int(self.headers.get('Content-Length', '0'))
+                post_data = self.rfile.read(content_length)
+                user_input = json.loads(post_data.decode('utf-8'))
+                
+                user_age = int(user_input.get('age', 0))
+                user_habits = user_input.get('habits', [])
+                user_conditions = user_input.get('conditions', [])
+                user_history = user_input.get('history', [])
+                
+                # 2. 計算推薦
+                recommend_results = self.calculate_recommendations(user_age, user_habits, user_conditions, user_history)
+                
+                # 3. 回傳 JSON 結果給前端
+                self._send_json(200, recommend_results)
+            except Exception as exc:
+                self._send_json(500, {
+                    "error": str(exc),
+                    "message": "後端推薦計算失敗"
+                })
         else:
-            self.send_response(404)
-            self.end_headers()
+            self._send_json(404, {"error": "not found"})
 
     def calculate_recommendations(self, age, habits, conditions, history):
         """核心推薦演算法邏輯"""
