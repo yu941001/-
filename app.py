@@ -12,7 +12,7 @@ ai_model = None
 product_classes = []
 
 MIN_RECOMMENDATIONS = 3
-MIN_SCORE_THRESHOLD = 5
+MIN_SCORE_THRESHOLD = 40
 
 try:
     BASE_DIR = Path(__file__).resolve().parent
@@ -279,16 +279,8 @@ class RecommendationAPIHandler(BaseHTTPRequestHandler):
 
             candidate_products.sort(key=lambda x: x["final_score"], reverse=True)
 
-            # 先保留高於門檻的產品，再補滿至少 3 筆，避免畫面只出現零星結果。
+            # 只保留超過門檻分數的產品，不補充低分產品
             scored_products = [item for item in candidate_products if item["final_score"] > MIN_SCORE_THRESHOLD]
-            if len(scored_products) < MIN_RECOMMENDATIONS:
-                existing_names = {item["product_name"] for item in scored_products}
-                for item in candidate_products:
-                    if item["product_name"] not in existing_names:
-                        scored_products.append(item)
-                        existing_names.add(item["product_name"])
-                    if len(scored_products) >= MIN_RECOMMENDATIONS:
-                        break
 
         # 4. 排序並回傳
         scored_products.sort(key=lambda x: x["final_score"], reverse=True)
