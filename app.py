@@ -102,6 +102,101 @@ def build_season_feature_map(current_diseases):
     }
 
 
+HABIT_ALIAS_MAP = {
+    "久坐": ["少運動"],
+    "睡眠不足": ["熬夜"],
+    "飲食不規律": ["外食"],
+}
+
+CONDITION_ALIAS_MAP = {
+    "過敏體質": ["免疫力低下"],
+    "睡眠品質不佳": ["容易疲勞"],
+    "消化不良": ["排便不順"],
+    "體能不佳": ["容易疲勞"],
+}
+
+HISTORY_ALIAS_MAP = {
+    "新冠肺炎": ["流感"],
+    "腸病毒": ["腹瀉"],
+    "諾羅病毒": ["腹瀉"],
+    "登革熱": ["流感"],
+    "骨質疏鬆": ["心血管"],
+    "失眠": ["流感"],
+}
+
+# 擴充選項（前端新增項目）對產品推薦的加權規則
+# 關鍵字會在「產品名稱 + 產品設定 + 疾病對應」中比對，命中即加分並產生理由。
+EXTRA_HABIT_KEYWORDS = {
+    "久坐": ["少運動", "關節", "心血管", "三高", "循環"],
+    "睡眠不足": ["睡眠", "失眠", "疲勞", "B群", "鎂"],
+    "飲食不規律": ["外食", "消化", "腸胃", "益生菌", "消化酵素"],
+    "健身": ["蛋白", "肌肉", "體能"],
+    "運動量大": ["電解質", "蛋白", "體能", "鎂"],
+    "喝水少": ["泌尿", "膳食纖維", "益生菌", "消化"],
+    "勞力工作": ["關節", "葡萄糖胺", "鎂", "體能"],
+}
+
+EXTRA_CONDITION_KEYWORDS = {
+    "過敏體質": ["過敏", "鼻炎", "氣喘", "益生菌"],
+    "三高風險": ["心血管", "高血脂", "紅麴", "魚油", "輔酶Q10"],
+    "睡眠品質不佳": ["失眠", "睡眠", "鎂", "B群", "疲勞"],
+    "消化不良": ["消化", "腸胃", "消化酵素", "益生菌", "膳食纖維"],
+    "體能不佳": ["體能", "蛋白", "B群", "輔酶Q10", "電解質"],
+    "眼睛疲勞": ["眼睛", "葉黃素", "乾眼"],
+    "皮膚乾燥": ["皮膚", "膠原蛋白", "維他命E", "抗氧化"],
+}
+
+EXTRA_HISTORY_KEYWORDS = {
+    "新冠肺炎": ["新冠", "呼吸道", "流感", "免疫"],
+    "失眠": ["失眠", "睡眠", "疲勞", "鎂", "B群"],
+    "腸病毒": ["腸病毒", "腸胃", "腹瀉", "益生菌"],
+    "諾羅病毒": ["諾羅", "腸胃", "腹瀉", "益生菌"],
+    "登革熱": ["登革熱", "流感", "免疫"],
+    "骨質疏鬆": ["骨質", "鈣D3", "關節", "葡萄糖胺"],
+}
+
+
+def expand_with_aliases(items, alias_map):
+    expanded = set(items)
+    for item in list(expanded):
+        for alias in alias_map.get(item, []):
+            expanded.add(alias)
+    return sorted(expanded)
+
+
+def normalize_user_inputs(habits, conditions, history):
+    norm_habits = expand_with_aliases(habits, HABIT_ALIAS_MAP)
+    norm_conditions = expand_with_aliases(conditions, CONDITION_ALIAS_MAP)
+    norm_history = expand_with_aliases(history, HISTORY_ALIAS_MAP)
+    return norm_habits, norm_conditions, norm_history
+
+
+def build_product_search_text(prod_name, profile, preventable):
+    habits_text = ' '.join(profile.get("target_habits", []))
+    conditions_text = ' '.join(profile.get("target_conditions", []))
+    disease_text = ' '.join(preventable)
+    return f"{prod_name} {habits_text} {conditions_text} {disease_text}"
+
+
+def score_extra_options(raw_items, keyword_map, search_text, reason_prefix, summary_prefix):
+    score = 0
+    reasons = []
+    summaries = []
+
+    for item in raw_items:
+        keywords = keyword_map.get(item, [])
+        hits = [k for k in keywords if k in search_text]
+        if not hits:
+            continue
+
+        bonus = 4 + min(4, len(hits))
+        score += bonus
+        reasons.append(f"{reason_prefix}：{item}（+{bonus}）")
+        summaries.append(f"{summary_prefix}「{item}」與產品特性關聯，提升推薦指數")
+
+    return min(score, 30), reasons, summaries
+
+
 def build_model_features(age, gender, habits, conditions, history, season_feature_map):
     """組合模型輸入：使用者個資 + 當月疾病資料庫特徵。"""
     gender_val = 1 if gender == '男' else 0
@@ -218,6 +313,10 @@ class RecommendationAPIHandler(BaseHTTPRequestHandler):
         global ai_model, product_classes
         """核心推薦演算法：AI 讀取使用者資料與爬蟲疾病資料庫後進行推薦。"""
         current_month = datetime.datetime.now().month
+        raw_habits = list(habits)
+        raw_conditions = list(conditions)
+        raw_history = list(history)
+        habits, conditions, history = normalize_user_inputs(habits, conditions, history)
         
         # 1. 從資料庫撈出當季高風險疾病
         conn = get_db_connection()
@@ -239,12 +338,12 @@ class RecommendationAPIHandler(BaseHTTPRequestHandler):
             if p_name not in product_disease_map:
                 product_disease_map[p_name] = []
             if p_name not in product_profile_map:
-                raw_habits = row['target_habits'] or ''
-                raw_conditions = row['target_conditions'] or ''
+                db_habits_text = row['target_habits'] or ''
+                db_conditions_text = row['target_conditions'] or ''
                 product_profile_map[p_name] = {
                     "min_age": row['min_age'] or 0,
-                    "target_habits": [h.strip() for h in raw_habits.split(',') if h.strip()],
-                    "target_conditions": [c.strip() for c in raw_conditions.split(',') if c.strip()]
+                    "target_habits": [h.strip() for h in db_habits_text.split(',') if h.strip()],
+                    "target_conditions": [c.strip() for c in db_conditions_text.split(',') if c.strip()]
                 }
             if row['disease_name']:
                 product_disease_map[p_name].append(row['disease_name'])
@@ -258,9 +357,15 @@ class RecommendationAPIHandler(BaseHTTPRequestHandler):
         user_profile = {
             "年齡": age,
             "性別": gender,
-            "生活習慣": habits if habits else ["無特殊習慣"],
-            "健康狀況": conditions if conditions else ["無特殊情況"],
-            "病史紀錄": history if history else ["無重大病史"],
+            "生活習慣": raw_habits if raw_habits else ["無特殊習慣"],
+            "健康狀況": raw_conditions if raw_conditions else ["無特殊情況"],
+            "病史紀錄": raw_history if raw_history else ["無重大病史"],
+            "特徵映射": {
+                "模型習慣特徵": habits,
+                "模型困擾特徵": conditions,
+                "模型病史特徵": history,
+            },
+            "擴充選項計分": "已啟用",
             "當月疾病資料庫訊號": [k for k, v in season_feature_map.items() if v == 1] or ["無明顯季節風險訊號"]
         }
 
@@ -296,6 +401,8 @@ class RecommendationAPIHandler(BaseHTTPRequestHandler):
                 min_age = profile["min_age"]
                 target_habits = profile["target_habits"]
                 target_conditions = profile["target_conditions"]
+                preventable = product_disease_map.get(prod_name, [])
+                product_search_text = build_product_search_text(prod_name, profile, preventable)
 
                 # 年齡未達建議值時略過該產品。
                 if age < min_age:
@@ -323,7 +430,6 @@ class RecommendationAPIHandler(BaseHTTPRequestHandler):
                     matching_reasons.append(f"💡 資料庫困擾匹配：{matched_text}")
                     summary_parts.append(f"你目前的健康困擾「{matched_text}」與此產品的目標需求一致")
 
-                preventable = product_disease_map.get(prod_name, [])
                 matched_history = []
                 for h in history:
                     keywords = history_to_keywords.get(h, [])
@@ -342,6 +448,43 @@ class RecommendationAPIHandler(BaseHTTPRequestHandler):
                         ai_score += 30 # 若命中當季流行病，大幅加分
                         matching_reasons.append(f"🌍 資料庫季節防護：【{disease}】")
                         summary_parts.append(f"目前季節風險包含「{disease}」，此產品可提供對應防護")
+
+                # 針對前端新增項目做額外關聯加權，並回傳可讀解釋
+                habit_bonus, habit_reasons, habit_summaries = score_extra_options(
+                    raw_habits,
+                    EXTRA_HABIT_KEYWORDS,
+                    product_search_text,
+                    "🧭 延伸習慣關聯",
+                    "你填寫的生活習慣",
+                )
+                if habit_bonus > 0:
+                    ai_score += habit_bonus
+                    matching_reasons.extend(habit_reasons)
+                    summary_parts.extend(habit_summaries)
+
+                condition_bonus, condition_reasons, condition_summaries = score_extra_options(
+                    raw_conditions,
+                    EXTRA_CONDITION_KEYWORDS,
+                    product_search_text,
+                    "🩺 延伸困擾關聯",
+                    "你填寫的健康困擾",
+                )
+                if condition_bonus > 0:
+                    ai_score += condition_bonus
+                    matching_reasons.extend(condition_reasons)
+                    summary_parts.extend(condition_summaries)
+
+                history_bonus, history_reasons, history_summaries = score_extra_options(
+                    raw_history,
+                    EXTRA_HISTORY_KEYWORDS,
+                    product_search_text,
+                    "📚 延伸病史關聯",
+                    "你填寫的歷史紀錄",
+                )
+                if history_bonus > 0:
+                    ai_score += history_bonus
+                    matching_reasons.extend(history_reasons)
+                    summary_parts.extend(history_summaries)
 
                 if min_age > 0:
                     summary_parts.append(f"你的年齡 {age} 歲已達建議使用年齡 {min_age} 歲")
