@@ -584,11 +584,16 @@
         
         const genderIcon = gender === '男' ? '🙋‍♂️' : '🙋‍♀️';
         document.getElementById('current-month-title').innerText = `⚡ 系統成功解碼：目前為 ${data.current_month} 月份 (${genderIcon} 專屬調配中)`;
-        
-        if(data.detected_seasonal_diseases.length > 0) {
-            document.getElementById('seasonal-diseases-text').innerText = `🚨 當季環境高風險：${data.detected_seasonal_diseases.join('、')}。系統已自動提高預防型保健食品的權重！`;
+
+        const freshness = data.seasonal_data_freshness || {};
+        const recentUpdateText = freshness.latest_recent_update || freshness.latest_any_update || '無資料';
+
+        if (freshness.has_recent_data && data.detected_seasonal_diseases.length > 0) {
+            document.getElementById('seasonal-diseases-text').innerText = `🚨 近期環境高風險：${data.detected_seasonal_diseases.join('、')}。資料新鮮度：最近 ${freshness.window_days} 天內有效，最新更新 ${recentUpdateText}。`;
+        } else if (freshness.status === 'stale') {
+            document.getElementById('seasonal-diseases-text').innerText = `⏳ 近期資料不足：最近 ${freshness.window_days} 天未更新，最新可用資料時間為 ${recentUpdateText}。`;
         } else {
-            document.getElementById('seasonal-diseases-text').innerText = `✨ 本月環境狀態良好，無特殊常態流行傳染病警訊。`;
+            document.getElementById('seasonal-diseases-text').innerText = `✨ 近期環境狀態良好，最近 ${freshness.window_days || 30} 天無特殊常態流行傳染病警訊。`;
         }
 
         const analysisPanel = document.getElementById('analysis-panel');

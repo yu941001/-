@@ -12,6 +12,9 @@ product_classes = []
 
 MIN_RECOMMENDATIONS = 3
 MIN_SCORE_THRESHOLD = 35
+AI_WEIGHT = 0.8
+RULE_WEIGHT = 0.2
+RULE_SCORE_CAP = 100
 
 try:
     BASE_DIR = Path(__file__).resolve().parent
@@ -313,16 +316,38 @@ class RecommendationAPIHandler(BaseHTTPRequestHandler):
         global ai_model, product_classes
         """核心推薦演算法：AI 讀取使用者資料與爬蟲疾病資料庫後進行推薦。"""
         current_month = datetime.datetime.now().month
+        recent_window_days = 30
         raw_habits = list(habits)
         raw_conditions = list(conditions)
         raw_history = list(history)
         habits, conditions, history = normalize_user_inputs(habits, conditions, history)
         
-        # 1. 從資料庫撈出當季高風險疾病
+        # 1. 從資料庫撈出「最近 N 天有效」疾病資料
         conn = get_db_connection()
         cursor = conn.cursor()
-        cursor.execute("SELECT disease_name FROM seasonal_diseases WHERE month = ?;", (current_month,))
-        current_diseases = [row['disease_name'] for row in cursor.fetchall()]
+        cursor.execute(
+            '''
+            SELECT disease_name, updated_at
+            FROM seasonal_diseases
+            WHERE updated_at >= datetime('now', ?)
+            ORDER BY updated_at DESC;
+            ''',
+            (f'-{recent_window_days} days',)
+        )
+        recent_rows = cursor.fetchall()
+        current_diseases = list(dict.fromkeys([row['disease_name'] for row in recent_rows if row['disease_name']]))
+
+        cursor.execute("SELECT MAX(updated_at) AS latest_any_update FROM seasonal_diseases;")
+        latest_any_update = cursor.fetchone()['latest_any_update']
+
+        latest_recent_update = recent_rows[0]['updated_at'] if recent_rows else None
+        seasonal_data_freshness = {
+            "window_days": recent_window_days,
+            "has_recent_data": len(recent_rows) > 0,
+            "latest_recent_update": latest_recent_update,
+            "latest_any_update": latest_any_update,
+            "status": "recent" if len(recent_rows) > 0 else ("stale" if latest_any_update else "empty")
+        }
         
         # 撈出資料庫中的產品條件與疾病對應。
         # 注意：若資料庫沒有對應資料，系統仍可用 AI 機率分數完成推薦。
@@ -366,7 +391,8 @@ class RecommendationAPIHandler(BaseHTTPRequestHandler):
                 "模型病史特徵": history,
             },
             "擴充選項計分": "已啟用",
-            "當月疾病資料庫訊號": [k for k, v in season_feature_map.items() if v == 1] or ["無明顯季節風險訊號"]
+            "近期疾病資料庫訊號": [k for k, v in season_feature_map.items() if v == 1] or ["無明顯季節風險訊號"],
+            "資料新鮮度": seasonal_data_freshness
         }
 
         scored_products = []
@@ -378,6 +404,7 @@ class RecommendationAPIHandler(BaseHTTPRequestHandler):
                 return {
                     "current_month": current_month,
                     "detected_seasonal_diseases": current_diseases,
+                    "seasonal_data_freshness": seasonal_data_freshness,
                     "user_analysis": user_profile,
                     "recommendations": [],
                     "error": f"模型特徵數不相容: 目前模型需要 {model_feature_count} 維，但後端輸入為 {len(features[0])} 維。請重新執行 generate_data.py 與 train_model.py。"
@@ -396,6 +423,7 @@ class RecommendationAPIHandler(BaseHTTPRequestHandler):
             
             for idx, prod_name in enumerate(product_classes):
                 ai_score = int(probabilities[idx] * 100) # 將機率轉為 0-100 分
+                rule_score = 0
 
                 profile = product_profile_map.get(prod_name, {"min_age": 0, "target_habits": [], "target_conditions": []})
                 min_age = profile["min_age"]
@@ -418,14 +446,16 @@ class RecommendationAPIHandler(BaseHTTPRequestHandler):
 
                 matched_habits = [h for h in habits if h in target_habits]
                 if matched_habits:
-                    ai_score += 8 + len(matched_habits) * 2
+                    base_habit_bonus = 8 + len(matched_habits) * 2
+                    rule_score += base_habit_bonus
                     matched_text = '、'.join(matched_habits)
                     matching_reasons.append(f"🧩 資料庫習慣匹配：{matched_text}")
                     summary_parts.append(f"你填寫的生活習慣「{matched_text}」符合這項產品的建議情境")
 
                 matched_conditions = [c for c in conditions if c in target_conditions]
                 if matched_conditions:
-                    ai_score += 10 + len(matched_conditions) * 2
+                    base_condition_bonus = 10 + len(matched_conditions) * 2
+                    rule_score += base_condition_bonus
                     matched_text = '、'.join(matched_conditions)
                     matching_reasons.append(f"💡 資料庫困擾匹配：{matched_text}")
                     summary_parts.append(f"你目前的健康困擾「{matched_text}」與此產品的目標需求一致")
@@ -437,7 +467,7 @@ class RecommendationAPIHandler(BaseHTTPRequestHandler):
                         matched_history.append(h)
 
                 if matched_history:
-                    ai_score += 20
+                    rule_score += 20
                     matched_text = '、'.join(matched_history)
                     matching_reasons.append(f"🛡️ 資料庫病史關聯：{matched_text}")
                     summary_parts.append(f"你填寫的病史「{matched_text}」與這項產品的保養方向有直接關聯")
@@ -445,7 +475,7 @@ class RecommendationAPIHandler(BaseHTTPRequestHandler):
                 # 混合邏輯：如果該產品在資料庫對應到當季流行病，進行加權
                 for disease in preventable:
                     if disease in current_diseases:
-                        ai_score += 30 # 若命中當季流行病，大幅加分
+                        rule_score += 30 # 若命中當季流行病，大幅加分
                         matching_reasons.append(f"🌍 資料庫季節防護：【{disease}】")
                         summary_parts.append(f"目前季節風險包含「{disease}」，此產品可提供對應防護")
 
@@ -458,7 +488,7 @@ class RecommendationAPIHandler(BaseHTTPRequestHandler):
                     "你填寫的生活習慣",
                 )
                 if habit_bonus > 0:
-                    ai_score += habit_bonus
+                    rule_score += habit_bonus
                     matching_reasons.extend(habit_reasons)
                     summary_parts.extend(habit_summaries)
 
@@ -470,7 +500,7 @@ class RecommendationAPIHandler(BaseHTTPRequestHandler):
                     "你填寫的健康困擾",
                 )
                 if condition_bonus > 0:
-                    ai_score += condition_bonus
+                    rule_score += condition_bonus
                     matching_reasons.extend(condition_reasons)
                     summary_parts.extend(condition_summaries)
 
@@ -482,9 +512,16 @@ class RecommendationAPIHandler(BaseHTTPRequestHandler):
                     "你填寫的歷史紀錄",
                 )
                 if history_bonus > 0:
-                    ai_score += history_bonus
+                    rule_score += history_bonus
                     matching_reasons.extend(history_reasons)
                     summary_parts.extend(history_summaries)
+
+                normalized_rule_score = min(RULE_SCORE_CAP, rule_score)
+                final_score = int(round(ai_score * AI_WEIGHT + normalized_rule_score * RULE_WEIGHT))
+                matching_reasons.append(f"⚖️ 混合評分：AI {int(AI_WEIGHT * 100)}% + 規則 {int(RULE_WEIGHT * 100)}%")
+                summary_parts.append(
+                    f"最終推薦指數 = AI分數({ai_score})×{AI_WEIGHT:.1f} + 規則分數({normalized_rule_score})×{RULE_WEIGHT:.1f}"
+                )
 
                 if min_age > 0:
                     summary_parts.append(f"你的年齡 {age} 歲已達建議使用年齡 {min_age} 歲")
@@ -496,7 +533,7 @@ class RecommendationAPIHandler(BaseHTTPRequestHandler):
 
                 candidate_products.append({
                     "product_name": prod_name,
-                    "final_score": ai_score,
+                    "final_score": final_score,
                     "ai_confidence": probabilities[idx],
                     "reasons": matching_reasons,
                     "analysis_summary": analysis_summary
@@ -514,6 +551,7 @@ class RecommendationAPIHandler(BaseHTTPRequestHandler):
         return {
             "current_month": current_month,
             "detected_seasonal_diseases": current_diseases,
+            "seasonal_data_freshness": seasonal_data_freshness,
             "user_analysis": user_profile,
             "recommendations": scored_products
         }
