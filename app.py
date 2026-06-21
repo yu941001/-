@@ -212,17 +212,26 @@ class RecommendationAPIHandler(BaseHTTPRequestHandler):
         cursor.execute("SELECT disease_name FROM seasonal_diseases WHERE month = ?;", (current_month,))
         current_diseases = [row['disease_name'] for row in cursor.fetchall()]
         
-        # 撈出所有產品與其對應的預防疾病
+        # 撈出所有產品與其對應的預防疾病、產品條件
         cursor.execute('''
-            SELECT p.name, m.disease_name 
+            SELECT p.name, p.min_age, p.target_habits, p.target_conditions, m.disease_name 
             FROM products p 
             LEFT JOIN product_disease_mapping m ON p.id = m.product_id;
         ''')
         product_disease_map = {}
+        product_profile_map = {}
         for row in cursor.fetchall():
             p_name = row['name']
             if p_name not in product_disease_map:
                 product_disease_map[p_name] = []
+            if p_name not in product_profile_map:
+                raw_habits = row['target_habits'] or ''
+                raw_conditions = row['target_conditions'] or ''
+                product_profile_map[p_name] = {
+                    "min_age": row['min_age'] or 0,
+                    "target_habits": [h.strip() for h in raw_habits.split(',') if h.strip()],
+                    "target_conditions": [c.strip() for c in raw_conditions.split(',') if c.strip()]
+                }
             if row['disease_name']:
                 product_disease_map[p_name].append(row['disease_name'])
         conn.close()
@@ -262,28 +271,77 @@ class RecommendationAPIHandler(BaseHTTPRequestHandler):
             # predict_proba 回傳每個產品的機率 (0.0~1.0)
             probabilities = ai_model.predict_proba(features)[0]
             candidate_products = []
+
+            history_to_keywords = {
+                "流感": ["流感", "感冒", "呼吸道"],
+                "腹瀉": ["腹瀉", "腸胃炎", "食物中毒"],
+                "過敏": ["過敏", "鼻炎", "氣喘"],
+                "心血管": ["心血管", "高血脂", "三高"]
+            }
             
             for idx, prod_name in enumerate(product_classes):
                 ai_score = int(probabilities[idx] * 100) # 將機率轉為 0-100 分
 
-                matching_reasons = [f"🤖 AI 分析相容度：{ai_score}%"]
+                profile = product_profile_map.get(prod_name, {"min_age": 0, "target_habits": [], "target_conditions": []})
+                min_age = profile["min_age"]
+                target_habits = profile["target_habits"]
+                target_conditions = profile["target_conditions"]
 
-                if any(k in history for k in ['流感', '腹瀉', '過敏', '心血管']):
-                    ai_score += 20 # 分數加權
-                    matching_reasons.append("🛡️ 您的病史記錄與此產品高度相關")
+                # 年齡未達建議值時略過該產品。
+                if age < min_age:
+                    continue
+
+                matching_reasons = [f"🤖 AI 分析相容度：{ai_score}%"]
+                summary_parts = []
+
+                matched_habits = [h for h in habits if h in target_habits]
+                if matched_habits:
+                    ai_score += 8 + len(matched_habits) * 2
+                    matched_text = '、'.join(matched_habits)
+                    matching_reasons.append(f"🧩 生活習慣匹配：{matched_text}")
+                    summary_parts.append(f"你填寫的生活習慣「{matched_text}」符合這項產品的建議情境")
+
+                matched_conditions = [c for c in conditions if c in target_conditions]
+                if matched_conditions:
+                    ai_score += 10 + len(matched_conditions) * 2
+                    matched_text = '、'.join(matched_conditions)
+                    matching_reasons.append(f"💡 健康困擾匹配：{matched_text}")
+                    summary_parts.append(f"你目前的健康困擾「{matched_text}」與此產品的目標需求一致")
+
+                preventable = product_disease_map.get(prod_name, [])
+                matched_history = []
+                for h in history:
+                    keywords = history_to_keywords.get(h, [])
+                    if any(any(k in disease for k in keywords) for disease in preventable):
+                        matched_history.append(h)
+
+                if matched_history:
+                    ai_score += 20
+                    matched_text = '、'.join(matched_history)
+                    matching_reasons.append(f"🛡️ 歷史紀錄關聯：{matched_text}")
+                    summary_parts.append(f"你填寫的病史「{matched_text}」與這項產品的保養方向有直接關聯")
 
                 # 混合邏輯：如果該產品能預防當季流行病，進行加權
-                preventable = product_disease_map.get(prod_name, [])
                 for disease in preventable:
                     if disease in current_diseases:
                         ai_score += 30 # 若命中當季流行病，大幅加分
                         matching_reasons.append(f"🌍 當季流行病防護：【{disease}】")
+                        summary_parts.append(f"目前季節風險包含「{disease}」，此產品可提供對應防護")
+
+                if min_age > 0:
+                    summary_parts.append(f"你的年齡 {age} 歲已達建議使用年齡 {min_age} 歲")
+
+                if summary_parts:
+                    analysis_summary = "；".join(summary_parts) + "。"
+                else:
+                    analysis_summary = "主要根據你的整體填答特徵與 AI 模型分數進行推薦。"
 
                 candidate_products.append({
                     "product_name": prod_name,
                     "final_score": ai_score,
                     "ai_confidence": probabilities[idx],
-                    "reasons": matching_reasons
+                    "reasons": matching_reasons,
+                    "analysis_summary": analysis_summary
                 })
 
             candidate_products.sort(key=lambda x: x["final_score"], reverse=True)

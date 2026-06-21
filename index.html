@@ -616,16 +616,10 @@
                 reasonsHTML += `<span class="reason-tag">${reason}</span>`;
             });
 
-            // 生成個性化分析摘要
-            let analysisText = '✅ ';
-            if (item.ai_confidence) {
-                const confidence = Math.round(item.ai_confidence * 100);
-                analysisText += `AI 分析相容度 ${confidence}%。`;
-            }
-            if (item.reasons.length > 0) {
-                const key_reasons = item.reasons.slice(0, 2).map(r => r.replace(/^[🤖🛡️🌍]\s*/, '')).join('，');
-                analysisText += `主要原因：${key_reasons}`;
-            }
+            const confidence = item.ai_confidence ? Math.round(item.ai_confidence * 100) : null;
+            const analysisText = item.analysis_summary
+                ? `✅ ${item.analysis_summary}`
+                : `✅ 主要根據 AI 分析相容度${confidence !== null ? ` ${confidence}%` : ''}與整體填答資料進行推薦。`;
 
             card.innerHTML = `
                 <span class="score-badge">推薦指數: ${item.final_score} 分</span>
