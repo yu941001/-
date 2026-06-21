@@ -3,6 +3,9 @@ services:
     name: dopamine-health-recommender
     env: python
     plan: free
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.9
     buildCommand: ""
     startCommand: "python app.py"
     autoDeploy: true
