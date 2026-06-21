@@ -20,6 +20,7 @@ y = df['Target_Product']
 print("正在訓練隨機森林模型...")
 model = RandomForestClassifier(n_estimators=100, random_state=42)
 model.fit(X, y)
+print(f"本次模型訓練完成，特徵維度: {model.n_features_in_}")
 
 # 4. 儲存模型與類別標籤，供 API 使用
 with open(output_path, 'wb') as f:

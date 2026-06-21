@@ -65,47 +65,6 @@ def init_database():
     );
     ''')
 
-    sample_products = [
-        ("綜合維他命", 12, "外食,熬夜", "容易疲勞"),
-        ("高濃度維他命C", 0, "壓力大", "免疫力低下"),
-        ("益生菌", 0, "外食", "排便不順,過敏體質"),
-        ("深海魚油", 18, "外食,少運動", "三高風險"),
-        ("葡萄糖胺", 50, "久站,勞力工作", "關節不適"),
-        ("B群", 12, "熬夜,壓力大", "精神不濟"),
-        ("葉黃素", 18, "長時間用眼,3C工作", "眼睛疲勞"),
-        ("鈣D3", 40, "少曬太陽,少運動", "骨骼保養"),
-        ("薑黃素", 30, "外食,久坐", "發炎體質")
-    ]
-
-    for prod in sample_products:
-        cursor.execute('''
-        INSERT OR IGNORE INTO products (name, min_age, target_habits, target_conditions)
-        VALUES (?, ?, ?, ?);
-        ''', prod)
-
-    sample_mappings = [
-        ("綜合維他命", "感冒"),
-        ("高濃度維他命C", "流感"),
-        ("高濃度維他命C", "呼吸道融合病毒"),
-        ("益生菌", "過敏性鼻炎"),
-        ("益生菌", "食物中毒/急性腸胃炎"),
-        ("深海魚油", "氣喘/心血管疾病"),
-        ("葡萄糖胺", "關節炎"),
-        ("B群", "感冒"),
-        ("葉黃素", "乾眼症"),
-        ("鈣D3", "骨質疏鬆"),
-        ("薑黃素", "發炎反應")
-    ]
-
-    for prod_name, disease in sample_mappings:
-        cursor.execute("SELECT id FROM products WHERE name = ?;", (prod_name,))
-        row = cursor.fetchone()
-        if row:
-            cursor.execute('''
-            INSERT OR IGNORE INTO product_disease_mapping (product_id, disease_name)
-            VALUES (?, ?);
-            ''', (row[0], disease))
-
     conn.commit()
     conn.close()
 
@@ -129,6 +88,43 @@ def get_local_ip():
         return '127.0.0.1'
     finally:
         sock.close()
+
+
+def build_season_feature_map(current_diseases):
+    """把爬蟲資料庫中的疾病清單轉成模型可用的季節特徵。"""
+    joined = ' '.join(current_diseases)
+    return {
+        "Season_流感": 1 if "流感" in joined else 0,
+        "Season_腸病毒": 1 if "腸病毒" in joined else 0,
+        "Season_登革熱": 1 if "登革熱" in joined else 0,
+        "Season_新冠肺炎": 1 if ("新冠肺炎" in joined or "COVID" in joined) else 0,
+        "Season_諾羅病毒": 1 if "諾羅" in joined else 0,
+    }
+
+
+def build_model_features(age, gender, habits, conditions, history, season_feature_map):
+    """組合模型輸入：使用者個資 + 當月疾病資料庫特徵。"""
+    gender_val = 1 if gender == '男' else 0
+    return [[
+        age, gender_val,
+        1 if '外食' in habits else 0,
+        1 if '熬夜' in habits else 0,
+        1 if '壓力大' in habits else 0,
+        1 if '少運動' in habits else 0,
+        1 if '容易疲勞' in conditions else 0,
+        1 if '免疫力低下' in conditions else 0,
+        1 if '排便不順' in conditions else 0,
+        1 if '關節不適' in conditions else 0,
+        1 if '流感' in history else 0,
+        1 if '腹瀉' in history else 0,
+        1 if '過敏' in history else 0,
+        1 if '心血管' in history else 0,
+        season_feature_map["Season_流感"],
+        season_feature_map["Season_腸病毒"],
+        season_feature_map["Season_登革熱"],
+        season_feature_map["Season_新冠肺炎"],
+        season_feature_map["Season_諾羅病毒"],
+    ]]
 
 class RecommendationAPIHandler(BaseHTTPRequestHandler):
 
@@ -220,7 +216,7 @@ class RecommendationAPIHandler(BaseHTTPRequestHandler):
 
     def calculate_recommendations(self, age, gender, habits, conditions, history):
         global ai_model, product_classes
-        """核心推薦演算法：AI 預測機率 + 季節性疾病加權 (Hybrid Model)"""
+        """核心推薦演算法：AI 讀取使用者資料與爬蟲疾病資料庫後進行推薦。"""
         current_month = datetime.datetime.now().month
         
         # 1. 從資料庫撈出當季高風險疾病
@@ -229,7 +225,8 @@ class RecommendationAPIHandler(BaseHTTPRequestHandler):
         cursor.execute("SELECT disease_name FROM seasonal_diseases WHERE month = ?;", (current_month,))
         current_diseases = [row['disease_name'] for row in cursor.fetchall()]
         
-        # 撈出所有產品與其對應的預防疾病、產品條件
+        # 撈出資料庫中的產品條件與疾病對應。
+        # 注意：若資料庫沒有對應資料，系統仍可用 AI 機率分數完成推薦。
         cursor.execute('''
             SELECT p.name, p.min_age, p.target_habits, p.target_conditions, m.disease_name 
             FROM products p 
@@ -253,24 +250,9 @@ class RecommendationAPIHandler(BaseHTTPRequestHandler):
                 product_disease_map[p_name].append(row['disease_name'])
         conn.close()
 
-        # 2. 準備 AI 模型需要的特徵 (順序必須與訓練時完全一致)
-        # 順序: Age, Gender(1=男,0=女), 外食, 熬夜, 壓力大, 少運動, 疲勞, 免疫力, 排便, 關節, 流感感冒, 腸病毒腹瀉, 過敏紀錄, 三高心血管
-        gender_val = 1 if gender == '男' else 0
-        features = [[
-            age, gender_val,
-            1 if '外食' in habits else 0,
-            1 if '熬夜' in habits else 0,
-            1 if '壓力大' in habits else 0,
-            1 if '少運動' in habits else 0,
-            1 if '容易疲勞' in conditions else 0,
-            1 if '免疫力低下' in conditions else 0,
-            1 if '排便不順' in conditions else 0,
-            1 if '關節不適' in conditions else 0,
-            1 if '流感' in history else 0,
-            1 if '腹瀉' in history else 0,
-            1 if '過敏' in history else 0,
-            1 if '心血管' in history else 0,
-        ]]
+        # 2. 準備 AI 模型特徵（使用者輸入 + 當月爬蟲疾病特徵）
+        season_feature_map = build_season_feature_map(current_diseases)
+        features = build_model_features(age, gender, habits, conditions, history, season_feature_map)
         
         # 記錄用戶輸入的分析
         user_profile = {
@@ -278,13 +260,24 @@ class RecommendationAPIHandler(BaseHTTPRequestHandler):
             "性別": gender,
             "生活習慣": habits if habits else ["無特殊習慣"],
             "健康狀況": conditions if conditions else ["無特殊情況"],
-            "病史紀錄": history if history else ["無重大病史"]
+            "病史紀錄": history if history else ["無重大病史"],
+            "當月疾病資料庫訊號": [k for k, v in season_feature_map.items() if v == 1] or ["無明顯季節風險訊號"]
         }
 
         scored_products = []
 
         # 3. 如果 AI 模型已載入，進行預測
         if ai_model is not None:
+            model_feature_count = getattr(ai_model, 'n_features_in_', None)
+            if model_feature_count and model_feature_count != len(features[0]):
+                return {
+                    "current_month": current_month,
+                    "detected_seasonal_diseases": current_diseases,
+                    "user_analysis": user_profile,
+                    "recommendations": [],
+                    "error": f"模型特徵數不相容: 目前模型需要 {model_feature_count} 維，但後端輸入為 {len(features[0])} 維。請重新執行 generate_data.py 與 train_model.py。"
+                }
+
             # predict_proba 回傳每個產品的機率 (0.0~1.0)
             probabilities = ai_model.predict_proba(features)[0]
             candidate_products = []
@@ -311,18 +304,23 @@ class RecommendationAPIHandler(BaseHTTPRequestHandler):
                 matching_reasons = [f"🤖 AI 分析相容度：{ai_score}%"]
                 summary_parts = []
 
+                active_season_signals = [name.replace('Season_', '') for name, val in season_feature_map.items() if val == 1]
+                if active_season_signals:
+                    matching_reasons.append(f"🌡️ AI 已納入當月疾病訊號：{'、'.join(active_season_signals)}")
+                    summary_parts.append("本次 AI 預測已同時考慮使用者填答與爬蟲資料庫中的當月疾病風險")
+
                 matched_habits = [h for h in habits if h in target_habits]
                 if matched_habits:
                     ai_score += 8 + len(matched_habits) * 2
                     matched_text = '、'.join(matched_habits)
-                    matching_reasons.append(f"🧩 生活習慣匹配：{matched_text}")
+                    matching_reasons.append(f"🧩 資料庫習慣匹配：{matched_text}")
                     summary_parts.append(f"你填寫的生活習慣「{matched_text}」符合這項產品的建議情境")
 
                 matched_conditions = [c for c in conditions if c in target_conditions]
                 if matched_conditions:
                     ai_score += 10 + len(matched_conditions) * 2
                     matched_text = '、'.join(matched_conditions)
-                    matching_reasons.append(f"💡 健康困擾匹配：{matched_text}")
+                    matching_reasons.append(f"💡 資料庫困擾匹配：{matched_text}")
                     summary_parts.append(f"你目前的健康困擾「{matched_text}」與此產品的目標需求一致")
 
                 preventable = product_disease_map.get(prod_name, [])
@@ -335,14 +333,14 @@ class RecommendationAPIHandler(BaseHTTPRequestHandler):
                 if matched_history:
                     ai_score += 20
                     matched_text = '、'.join(matched_history)
-                    matching_reasons.append(f"🛡️ 歷史紀錄關聯：{matched_text}")
+                    matching_reasons.append(f"🛡️ 資料庫病史關聯：{matched_text}")
                     summary_parts.append(f"你填寫的病史「{matched_text}」與這項產品的保養方向有直接關聯")
 
-                # 混合邏輯：如果該產品能預防當季流行病，進行加權
+                # 混合邏輯：如果該產品在資料庫對應到當季流行病，進行加權
                 for disease in preventable:
                     if disease in current_diseases:
                         ai_score += 30 # 若命中當季流行病，大幅加分
-                        matching_reasons.append(f"🌍 當季流行病防護：【{disease}】")
+                        matching_reasons.append(f"🌍 資料庫季節防護：【{disease}】")
                         summary_parts.append(f"目前季節風險包含「{disease}」，此產品可提供對應防護")
 
                 if min_age > 0:

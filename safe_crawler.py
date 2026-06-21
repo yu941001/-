@@ -71,46 +71,6 @@ def init_database():
     );
     ''')
 
-    # 預設產品資料
-    sample_products = [
-        ("綜合維他命", 12, "外食,熬夜", "容易疲勞"),
-        ("高濃度維他命C", 0, "壓力大", "免疫力低下"),
-        ("益生菌", 0, "外食", "排便不順,過敏體質"),
-        ("深海魚油", 18, "外食,少運動", "三高風險"),
-        ("葡萄糖胺", 50, "久站,勞力工作", "關節不適")
-    ]
-
-    for prod in sample_products:
-        try:
-            cursor.execute('''
-            INSERT OR IGNORE INTO products (name, min_age, target_habits, target_conditions)
-            VALUES (?, ?, ?, ?);
-            ''', prod)
-        except sqlite3.Error as e:
-            pass  # 避免重複執行時重複輸出錯誤
-
-    # 預設產品與疾病對應
-    sample_mappings = [
-        ("綜合維他命", "感冒"),
-        ("高濃度維他命C", "流感"),
-        ("高濃度維他命C", "呼吸道融合病毒"),
-        ("益生菌", "過敏性鼻炎"),
-        ("益生菌", "食物中毒/急性腸胃炎"),
-        ("益生菌", "諾羅病毒"),
-        ("深海魚油", "氣喘/心血管疾病"),
-        ("深海魚油", "心血管疾病")
-    ]
-
-    for prod_name, disease in sample_mappings:
-        cursor.execute("SELECT id FROM products WHERE name = ?;", (prod_name,))
-        row = cursor.fetchone()
-        if row:
-            prod_id = row[0]
-            cursor.execute('''
-            INSERT OR IGNORE INTO product_disease_mapping (product_id, disease_name)
-            VALUES (?, ?);
-            ''', (prod_id, disease))
-
     conn.commit()
     conn.close()
 
