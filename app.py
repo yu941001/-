@@ -246,6 +246,15 @@ class RecommendationAPIHandler(BaseHTTPRequestHandler):
             1 if '過敏' in history else 0,
             1 if '心血管' in history else 0,
         ]]
+        
+        # 記錄用戶輸入的分析
+        user_profile = {
+            "年齡": age,
+            "性別": gender,
+            "生活習慣": habits if habits else ["無特殊習慣"],
+            "健康狀況": conditions if conditions else ["無特殊情況"],
+            "病史紀錄": history if history else ["無重大病史"]
+        }
 
         scored_products = []
 
@@ -256,24 +265,25 @@ class RecommendationAPIHandler(BaseHTTPRequestHandler):
             candidate_products = []
             
             for idx, prod_name in enumerate(product_classes):
-                base_score = int(probabilities[idx] * 100) # 將機率轉為 0-100 分
+                ai_score = int(probabilities[idx] * 100) # 將機率轉為 0-100 分
 
-                matching_reasons = [f"🤖 AI 模型預測契合度：{base_score}%"]
+                matching_reasons = [f"🤖 AI 分析相容度：{ai_score}%"]
 
                 if any(k in history for k in ['流感', '腹瀉', '過敏', '心血管']):
-                    base_score += 20 # 分數加權
-                    matching_reasons.append("🛡️ 針對您的歷史紀錄加強保護")
+                    ai_score += 20 # 分數加權
+                    matching_reasons.append("🛡️ 您的病史記錄與此產品高度相關")
 
                 # 混合邏輯：如果該產品能預防當季流行病，進行加權
                 preventable = product_disease_map.get(prod_name, [])
                 for disease in preventable:
                     if disease in current_diseases:
-                        base_score += 30 # 若命中當季流行病，大幅加分
-                        matching_reasons.append(f"🚨 抵禦當季高風險：【{disease}】")
+                        ai_score += 30 # 若命中當季流行病，大幅加分
+                        matching_reasons.append(f"🌍 當季流行病防護：【{disease}】")
 
                 candidate_products.append({
                     "product_name": prod_name,
-                    "final_score": base_score,
+                    "final_score": ai_score,
+                    "ai_confidence": probabilities[idx],
                     "reasons": matching_reasons
                 })
 
@@ -289,6 +299,7 @@ class RecommendationAPIHandler(BaseHTTPRequestHandler):
         return {
             "current_month": current_month,
             "detected_seasonal_diseases": current_diseases,
+            "user_analysis": user_profile,
             "recommendations": scored_products
         }
 
