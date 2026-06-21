@@ -1,0 +1,3 @@
+SYSTEM_NAME=dopamine-health-recommender
+CREATED_AT=2026-06-21
+DESCRIPTION=Deployment data marker file for project upload
