@@ -7,10 +7,10 @@ DB_PATH = BASE_DIR / 'health_system.db'
 
 def get_db_connection():
     conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row # 讓查詢結果可以用欄位名稱讀取，例如 row['name']
+    conn.row_factory = sqlite3.Row
     return conn
 
-# 【給爬蟲用】儲存爬到的季節性疾病
+# 儲存季節性疾病資料
 def save_seasonal_disease(month, disease_name, risk_level, source):
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -25,7 +25,7 @@ def save_seasonal_disease(month, disease_name, risk_level, source):
     finally:
         conn.close()
 
-# 【給 API 推薦邏輯用】根據月份撈出當季流行疾病
+# 依月份取得季節性疾病
 def get_diseases_by_month(month):
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -36,11 +36,11 @@ def get_diseases_by_month(month):
     conn.close()
     return [row['disease_name'] for row in rows]
 
-# 【給 API 推薦邏輯用】撈出所有保健食品及它們能預防的疾病
+# 取得所有保健食品與對應疾病
 def get_all_products_with_diseases():
     conn = get_db_connection()
     cursor = conn.cursor()
-    # 使用 LEFT JOIN 把產品和它對應的疾病連在一起
+    # 將產品與對應疾病一起取出
     cursor.execute('''
     SELECT p.id, p.name, p.min_age, p.target_habits, p.target_conditions, m.disease_name
     FROM products p
@@ -49,7 +49,7 @@ def get_all_products_with_diseases():
     rows = cursor.fetchall()
     conn.close()
     
-    # 整理成結構化的字典
+    # 整理成結構化資料
     products_dict = {}
     for row in rows:
         pid = row['id']
