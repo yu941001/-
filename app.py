@@ -4,7 +4,6 @@ import datetime
 import os
 import socket
 import pickle
-import numpy as np
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 
