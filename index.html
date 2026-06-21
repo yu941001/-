@@ -229,6 +229,38 @@
             font-weight: 800;
         }
 
+        .analysis-panel {
+            background: rgba(255, 255, 255, 0.78);
+            border: 2px solid #c7d2fe;
+            border-radius: var(--radius);
+            padding: 18px 20px;
+            margin-bottom: 24px;
+            box-shadow: var(--shadow);
+        }
+
+        .analysis-panel h3 {
+            font-size: 1.1rem;
+            margin-bottom: 12px;
+            color: #1e293b;
+            font-weight: 800;
+        }
+
+        .analysis-grid {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 8px;
+        }
+
+        .analysis-item {
+            background: #ffffff;
+            border-radius: 12px;
+            padding: 10px 12px;
+            border: 1px solid #e2e8f0;
+            color: #334155;
+            font-size: 0.95rem;
+            line-height: 1.5;
+        }
+
         .product-list {
             display: flex;
             flex-direction: column;
@@ -441,6 +473,11 @@
             <p id="seasonal-diseases-text">正在對接五大官網疾病環境數據...</p>
         </div>
 
+        <div class="analysis-panel" id="analysis-panel" style="display:none;">
+            <h3>🧠 AI 使用者分析</h3>
+            <div class="analysis-grid" id="analysis-grid"></div>
+        </div>
+
         <h2 style="font-weight: 800; color: #1e293b; margin-bottom: 15px;">🌟 專屬調配！最適合你的補給排行</h2>
         <div class="product-list" id="product-list-container">
             </div>
@@ -517,6 +554,31 @@
             document.getElementById('seasonal-diseases-text').innerText = `🚨 當季環境高風險：${data.detected_seasonal_diseases.join('、')}。系統已自動提高預防型保健食品的權重！`;
         } else {
             document.getElementById('seasonal-diseases-text').innerText = `✨ 本月環境狀態良好，無特殊常態流行傳染病警訊。`;
+        }
+
+        const analysisPanel = document.getElementById('analysis-panel');
+        const analysisGrid = document.getElementById('analysis-grid');
+        analysisGrid.innerHTML = '';
+
+        if (data.user_analysis) {
+            analysisPanel.style.display = 'block';
+
+            const analysisItems = [
+                ['年齡', data.user_analysis.年齡],
+                ['性別', data.user_analysis.性別],
+                ['生活習慣', (data.user_analysis.生活習慣 || []).join('、')],
+                ['健康狀況', (data.user_analysis.健康狀況 || []).join('、')],
+                ['病史紀錄', (data.user_analysis.病史紀錄 || []).join('、')]
+            ];
+
+            analysisItems.forEach(([label, value]) => {
+                const item = document.createElement('div');
+                item.className = 'analysis-item';
+                item.innerText = `${label}：${value || '無'}`;
+                analysisGrid.appendChild(item);
+            });
+        } else {
+            analysisPanel.style.display = 'none';
         }
 
         const container = document.getElementById('product-list-container');
