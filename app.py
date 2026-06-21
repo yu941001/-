@@ -168,6 +168,23 @@ class RecommendationAPIHandler(BaseHTTPRequestHandler):
         self.send_response(404)
         self.end_headers()
 
+    def do_HEAD(self):
+        """處理平台健康檢查的 HEAD 請求。"""
+        if self.path in ('/', '/index.html'):
+            self.send_response(200)
+            self.send_header('Content-Type', 'text/html; charset=utf-8')
+            self.end_headers()
+            return
+
+        if self.path == '/api/recommend':
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json; charset=utf-8')
+            self.end_headers()
+            return
+
+        self.send_response(404)
+        self.end_headers()
+
     def do_OPTIONS(self):
         """處理瀏覽器的預檢請求。"""
         self.send_response(204)
