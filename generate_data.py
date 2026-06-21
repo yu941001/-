@@ -7,7 +7,7 @@ from pathlib import Path
 NUM_SAMPLES = int(os.environ.get("NUM_SAMPLES", "5000"))
 
 data = []
-products = ["綜合維他命", "高濃度維他命C", "益生菌", "深海魚油", "葡萄糖胺", "B群", "葉黃素", "鈣D3", "薑黃素"]
+products = ["綜合維他命", "高濃度維他命C", "益生菌", "深海魚油", "葡萄糖胺", "B群", "葉黃素", "鈣D3", "薑黃素", "膠原蛋白", "蛋白質粉", "鎂補充劑", "消化酵素", "靈芝孢子粉", "紅麴"]
 
 for _ in range(NUM_SAMPLES):
     # 隨機生成使用者特徵
@@ -53,6 +53,20 @@ for _ in range(NUM_SAMPLES):
         product_scores["深海魚油"] += 9
     if cond_joint == 1 or age > 35:
         product_scores["薑黃素"] += 6
+    
+    # 新增 6 個產品的推薦邏輯
+    if age >= 25 and (habit_stay_late == 1 or habit_stress == 1):
+        product_scores["膠原蛋白"] += 7
+    if age >= 16 and habit_no_exercise == 0:  # 運動愛好者
+        product_scores["蛋白質粉"] += 8
+    if habit_stress == 1 or (habit_stay_late == 1 and cond_fatigue == 1):
+        product_scores["鎂補充劑"] += 7
+    if habit_eat_out == 1 or cond_digestion == 1:
+        product_scores["消化酵素"] += 6
+    if habit_stay_late == 1 or cond_fatigue == 1 or (age >= 30 and habit_stress == 1):
+        product_scores["靈芝孢子粉"] += 8
+    if age >= 40 or hist_cardio == 1 or habit_no_exercise == 1:
+        product_scores["紅麴"] += 7
 
     target = max(product_scores, key=product_scores.get)
 

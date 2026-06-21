@@ -12,7 +12,7 @@ ai_model = None
 product_classes = []
 
 MIN_RECOMMENDATIONS = 3
-MIN_SCORE_THRESHOLD = 40
+MIN_SCORE_THRESHOLD = 35
 
 try:
     BASE_DIR = Path(__file__).resolve().parent
