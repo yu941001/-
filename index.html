@@ -718,7 +718,7 @@
         document.getElementById('result-section').style.display = 'block';
         
         const genderIcon = gender === '男' ? '🙋‍♂️' : '🙋‍♀️';
-        document.getElementById('current-month-title').innerText = `⚡ 系統成功解碼：目前為 ${data.current_month} 月份 (${genderIcon} 專屬調配中)`;
+        document.getElementById('current-month-title').innerText = `⚡ 系統成功解碼：目前為 ${data.current_month} 月份 (📝 專屬調配中)`;
 
         const freshness = data.seasonal_data_freshness || {};
         const recentUpdateText = freshness.latest_recent_update || freshness.latest_any_update || '無資料';
