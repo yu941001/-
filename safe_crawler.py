@@ -1,10 +1,9 @@
 import json
-import re
 import time
 import random
 import datetime
 import sqlite3
-from urllib.error import URLError, HTTPError
+from typing import Any, Optional
 from urllib.request import Request, urlopen
 from bs4 import BeautifulSoup
 
@@ -16,12 +15,12 @@ HEADERS = {
     'Referer': 'https://www.google.com/'
 }
 
-def get_db_connection():
+def get_db_connection() -> sqlite3.Connection:
     conn = sqlite3.connect('health_system.db')
     conn.row_factory = sqlite3.Row
     return conn
 
-def save_seasonal_disease(month, disease_name, risk_level, source):
+def save_seasonal_disease(month: int, disease_name: str, risk_level: str, source: str) -> None:
     conn = get_db_connection()
     cursor = conn.cursor()
     try:
@@ -35,7 +34,7 @@ def save_seasonal_disease(month, disease_name, risk_level, source):
     finally:
         conn.close()
 
-def init_database():
+def init_database() -> None:
     conn = sqlite3.connect('health_system.db')
     cursor = conn.cursor()
     cursor.execute("PRAGMA foreign_keys = ON;")
@@ -74,27 +73,30 @@ def init_database():
     conn.commit()
     conn.close()
 
-def random_sleep(min_sec=2, max_sec=5):
+def random_sleep(min_sec: float = 2, max_sec: float = 5) -> None:
     """隨機延遲，降低請求頻率。"""
     sleep_time = random.uniform(min_sec, max_sec)
     print(f"😴 偽裝人類瀏覽中... 隨機等待 {sleep_time:.1f} 秒...")
     time.sleep(sleep_time)
 
-def fetch_html(url, headers, timeout=10):
+def fetch_html(url: str, headers: dict[str, str], timeout: int = 10) -> str:
     request = Request(url, headers=headers)
     with urlopen(request, timeout=timeout) as response:
         return response.read().decode("utf-8", errors="ignore")
 
-def check_if_already_crawled_this_month(month):
+def check_if_already_crawled_this_month(month: int) -> bool:
     """檢查資料庫中是否已有當月資料。"""
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute("SELECT COUNT(*) FROM seasonal_diseases WHERE month = ?;", (month,))
-    count = cursor.fetchone()[0]
+    row = cursor.fetchone()
     conn.close()
+    if row is None:
+        return False
+    count = int(row[0])
     return count > 0
 
-def get_current_season_months():
+def get_current_season_months() -> tuple[list[int], str]:
     """取得當季月份列表與季節名稱。"""
     current_month = datetime.datetime.now().month
     if current_month in [3, 4, 5]:    return [3, 4, 5], "春季"
@@ -104,10 +106,10 @@ def get_current_season_months():
 
 # ==================== 5個網站的爬取函數 ====================
 
-def crawl_cdc_main():
+def crawl_cdc_main() -> list[str]:
     print("\n🔎 [1/5] 正在讀取並解析：疾管署全球資訊網...")
     url = "https://www.cdc.gov.tw/Category/MPage/gL7W5Z2ftD798b7pG7T6Sg"
-    found_diseases = []
+    found_diseases: list[str] = []
     try:
         html = fetch_html(url, HEADERS)
         soup = BeautifulSoup(html, "html.parser")
@@ -125,13 +127,13 @@ def crawl_cdc_main():
         
     return found_diseases if found_diseases else ["感冒"]
 
-def crawl_cdc_nidss(season_name=None):
+def crawl_cdc_nidss(season_name: Optional[str] = None) -> list[str]:
     print("\n🔎 [2/5] 正在讀取並解析：衛福部疾管署 開放資料 API (JSON)...")
-    found_diseases = []
+    found_diseases: list[str] = []
     
     # 疾管署官方開放資料 (健保門急診就診人次趨勢 JSON API)
     # 這些是真實營運中的政府公開資料端點
-    api_endpoints = {
+    api_endpoints: dict[str, str] = {
         "流感": "https://od.cdc.gov.tw/eic/NHI_Flu.json",
         "腸病毒": "https://od.cdc.gov.tw/eic/NHI_Enterovius.json",
         "腹瀉": "https://od.cdc.gov.tw/eic/NHI_Diarrhea.json"
@@ -141,7 +143,7 @@ def crawl_cdc_nidss(season_name=None):
         try:
             # 沿用原本寫好的 fetch_html 來帶入偽裝標頭發送請求
             response_text = fetch_html(url, HEADERS)
-            data = json.loads(response_text)
+            data: Any = json.loads(response_text)
             
             # 確保有拿到資料陣列
             if isinstance(data, list) and len(data) > 0:
@@ -165,22 +167,25 @@ def crawl_cdc_nidss(season_name=None):
     # 這時才退回到以當前季節做推估的模型
     if not found_diseases:
         print("⚠️ 無法從 API 獲取足夠數據，啟動備用機制，切換回季節性模型預測...")
-        season_mapping = {
+        season_mapping: dict[str, list[str]] = {
             "春季": ["過敏性鼻炎", "麻疹"],
             "夏季": ["腸病毒", "食物中毒/急性腸胃炎"],
             "秋季": ["登革熱", "呼吸道融合病毒"],
             "冬季": ["流感", "諾羅病毒"]
         }
-        fallback = season_mapping.get(season_name, ["感冒"])
+        if season_name is not None:
+            fallback = season_mapping.get(season_name, ["感冒"])
+        else:
+            fallback = ["感冒"]
         return fallback
 
     print(f"✅ 疾管署開放資料 API 掃描完成，從真實就診數據發現近期活躍疾病: {list(set(found_diseases))}")
     return list(set(found_diseases))
 
-def crawl_data_gov():
+def crawl_data_gov() -> list[str]:
     print("\n🔎 [3/5] 正在讀取並解析：政府開放資料平台...")
     url = "https://data.gov.tw/datasets/search?p=1&size=10&s=download_count_desc&k=%E5%85%8D%E7%96%AB"
-    found_diseases = []
+    found_diseases: list[str] = []
     try:
         html = fetch_html(url, HEADERS)
         soup = BeautifulSoup(html, "html.parser")
@@ -194,10 +199,10 @@ def crawl_data_gov():
         print(f"⚠️ 開放資料平台解析異常: {e}")
     return found_diseases
 
-def crawl_nhi():
+def crawl_nhi() -> list[str]:
     print("\n🔎 [4/5] 正在讀取並解析：中央健康保險署...")
     url = "https://www.nhi.gov.tw/ch/lp-3197-1.html"
-    found_diseases = []
+    found_diseases: list[str] = []
     try:
         html = fetch_html(url, HEADERS)
         soup = BeautifulSoup(html, "html.parser")
@@ -212,10 +217,10 @@ def crawl_nhi():
         print(f"⚠️ 健保署解析失敗: {e}")
     return found_diseases
 
-def crawl_fda():
+def crawl_fda() -> list[str]:
     print("\n🔎 [5/5] 正在讀取並解析：食藥署公告...")
     url = "https://www.fda.gov.tw/TC/news.aspx?cid=4"
-    found_diseases = []
+    found_diseases: list[str] = []
     try:
         html = fetch_html(url, HEADERS)
         soup = BeautifulSoup(html, "html.parser")
@@ -232,7 +237,7 @@ def crawl_fda():
 
 # ==================== 主控執行程序 ====================
 
-def main_secure_crawler():
+def main_secure_crawler() -> None:
     print("🚀 === 真實數據解析型「季節疾病爬蟲」啟動 ===")
 
     init_database()
@@ -249,7 +254,7 @@ def main_secure_crawler():
     
     print("🆕 本月尚未有數據，準備開始對真實網頁進行爬取與解析...")
     
-    all_discovered_diseases = []
+    all_discovered_diseases: list[str] = []
     
     # 依序爬取五個網站，並加入隨機延遲
     all_discovered_diseases.extend(crawl_cdc_main())
@@ -267,7 +272,7 @@ def main_secure_crawler():
     all_discovered_diseases.extend(crawl_fda())
     
     # 過濾空值並去除重複的疾病
-    unique_diseases = list(set([d for d in all_discovered_diseases if d]))
+    unique_diseases: list[str] = list(set([d for d in all_discovered_diseases if d]))
     print(f"\n✨ 爬蟲與解析成功！本季從官網偵測到的實際疾病包含: {unique_diseases}")
     
     print("\n🗄️ 正在將真實資料寫入 SQLite 資料庫...")
