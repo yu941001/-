@@ -2,5 +2,8 @@
     "python.defaultInterpreterPath": "c:\\Users\\lsp10\\OneDrive\\桌面\\程式設計\\.venv\\Scripts\\python.exe",
     "python.analysis.extraPaths": [
         "c:\\Users\\lsp10\\OneDrive\\桌面\\程式設計\\.venv\\Lib\\site-packages"
-    ]
+    ],
+    "python.analysis.diagnosticSeverityOverrides": {
+        "reportMissingImports": "none"
+    }
 }
