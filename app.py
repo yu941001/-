@@ -3,6 +3,8 @@ import sqlite3
 import datetime
 import os
 import socket
+import pickle
+import numpy as np
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from typing import Any
@@ -17,10 +19,16 @@ RULE_SCORE_CAP = 100
 BASE_DIR = Path(__file__).resolve().parent
 INDEX_FILE = BASE_DIR / 'index.html'
 DB_PATH = BASE_DIR / 'health_system.db'
+MODEL_PATH = BASE_DIR / 'recommendation_model.pkl'
 
 LLM_MODEL_NAME = os.environ.get('LLM_MODEL', 'gpt-4.1-mini')
 llm_client = None
 llm_enabled = False
+
+rf_model = None
+rf_enabled = False
+rf_feature_shape = None
+rf_product_names = []
 
 
 class RecommendationItem(BaseModel):
@@ -40,7 +48,6 @@ def init_llm_client():
     global llm_client, llm_enabled
     api_key = os.environ.get('OPENAI_API_KEY', '').strip()
     if not api_key:
-        print('WARNING: OPENAI_API_KEY not found. Fallback rule engine will be used.')
         llm_enabled = False
         llm_client = None
         return
@@ -49,11 +56,37 @@ def init_llm_client():
     try:
         llm_client = OpenAI(api_key=api_key, base_url=base_url)
         llm_enabled = True
-        print(f'LLM enabled: {LLM_MODEL_NAME}')
+        print(f'✓ LLM enabled: {LLM_MODEL_NAME}')
     except Exception as exc:
-        print(f'WARNING: LLM init failed: {exc}. Fallback rule engine will be used.')
         llm_enabled = False
         llm_client = None
+
+
+def init_rf_model():
+    global rf_model, rf_enabled, rf_feature_shape, rf_product_names
+    
+    if not MODEL_PATH.exists():
+        print(f'WARNING: Random Forest model not found at {MODEL_PATH}')
+        rf_enabled = False
+        return
+    
+    try:
+        with open(MODEL_PATH, 'rb') as f:
+            model_data = pickle.load(f)
+        
+        rf_model = model_data.get('model')
+        rf_feature_shape = model_data.get('feature_shape')
+        rf_product_names = model_data.get('product_names', [])
+        
+        if rf_model is not None:
+            rf_enabled = True
+            print(f'✓ Random Forest model loaded successfully')
+        else:
+            print(f'WARNING: Random Forest model file is corrupted or empty')
+            rf_enabled = False
+    except Exception as exc:
+        print(f'WARNING: Failed to load Random Forest model: {exc}')
+        rf_enabled = False
 
 
 def init_database():
@@ -358,6 +391,87 @@ def build_rule_based_candidates(
     return candidate_products
 
 
+def call_rf_recommendation(
+    age: int,
+    gender: str,
+    raw_habits: list[str],
+    raw_conditions: list[str],
+    raw_history: list[str],
+    normalized_habits: list[str],
+    normalized_conditions: list[str],
+    normalized_history: list[str],
+    current_diseases: list[str],
+    product_profile_map: dict[str, dict[str, Any]],
+    product_disease_map: dict[str, list[str]],
+):
+    """用隨機森林模型進行推薦。"""
+    if not rf_enabled or rf_model is None or not rf_feature_shape:
+        return []
+
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute('SELECT DISTINCT target_habits FROM products;')
+        all_habits_raw = set()
+        for row in cursor.fetchall():
+            habits_str = row[0] or ''
+            all_habits_raw.update([h.strip() for h in habits_str.split(',') if h.strip()])
+        
+        cursor.execute('SELECT DISTINCT target_conditions FROM products;')
+        all_conditions_raw = set()
+        for row in cursor.fetchall():
+            conditions_str = row[0] or ''
+            all_conditions_raw.update([c.strip() for c in conditions_str.split(',') if c.strip()])
+        
+        cursor.execute('SELECT DISTINCT disease_name FROM seasonal_diseases;')
+        all_diseases = [row[0] for row in cursor.fetchall()]
+        
+        conn.close()
+
+        all_habits = sorted(all_habits_raw) if all_habits_raw else []
+        all_conditions = sorted(all_conditions_raw) if all_conditions_raw else []
+        
+        # 構建特徵向量（與 train_model.py 同步）
+        gender_encoded = 1 if gender == '男' else 0
+        habits_vec = [1 if h in normalized_habits else 0 for h in all_habits]
+        conditions_vec = [1 if c in normalized_conditions else 0 for c in all_conditions]
+        history_vec = [1 if h in normalized_history else 0 for h in list(HISTORY_ALIAS_MAP.keys())]
+        diseases_vec = [1 if d in current_diseases else 0 for d in all_diseases]
+
+        feature_vector = np.array([[age, gender_encoded] + habits_vec + conditions_vec + history_vec + diseases_vec])
+
+        # 用模型預測所有產品的分數
+        predictions = rf_model.predict(feature_vector)[0]
+
+        results = []
+        for idx, product_name in enumerate(product_profile_map.keys()):
+            if idx >= len(predictions):
+                break
+            
+            score = float(predictions[idx])
+            if score <= MIN_SCORE_THRESHOLD:
+                continue
+
+            min_age = product_profile_map[product_name].get('min_age', 0)
+            if age < min_age:
+                continue
+
+            results.append({
+                'product_name': product_name,
+                'final_score': int(min(100, max(0, score))),
+                'ai_confidence': round(score / 100, 2),
+                'reasons': ['🌳 Random Forest 模型評估'],
+                'analysis_summary': f'Random Forest 模型根據你的特徵推薦此產品（評分：{score:.1f}/100）',
+            })
+
+        results.sort(key=lambda x: x['final_score'], reverse=True)
+        return results[:6]
+
+    except Exception as exc:
+        print(f'WARNING: Random Forest prediction failed: {exc}')
+        return []
+
+
 def call_llm_recommendation(
     age: int,
     gender: str,
@@ -620,8 +734,8 @@ class RecommendationAPIHandler(BaseHTTPRequestHandler):
                 '模型病史特徵': history,
             },
             '推薦引擎': {
-                'mode': 'llm' if llm_enabled else 'rule-fallback',
-                'model': LLM_MODEL_NAME if llm_enabled else 'none',
+                'mode': 'llm' if llm_enabled else ('random-forest' if rf_enabled else 'none'),
+                'model': LLM_MODEL_NAME if llm_enabled else ('Random Forest' if rf_enabled else 'none'),
             },
             '近期疾病資料庫訊號': [k for k, v in season_feature_map.items() if v == 1] or ['無明顯季節風險訊號'],
             '資料新鮮度': seasonal_data_freshness,
@@ -641,6 +755,10 @@ class RecommendationAPIHandler(BaseHTTPRequestHandler):
             product_disease_map=product_disease_map,
         )
 
+        # Priority: LLM → Random Forest (no Rule Engine fallback)
+        scored_products = []
+        
+        # Try LLM first
         llm_candidates = call_llm_recommendation(
             age=age,
             gender=gender,
@@ -655,21 +773,29 @@ class RecommendationAPIHandler(BaseHTTPRequestHandler):
             product_profile_map=product_profile_map,
             product_disease_map=product_disease_map,
         )
-
+        
         if llm_candidates:
             scored_products = [item for item in llm_candidates if item['final_score'] > MIN_SCORE_THRESHOLD]
         else:
-            scored_products = list(rule_candidates)
-
-        if len(scored_products) < MIN_RECOMMENDATIONS:
-            existing = {item['product_name'] for item in scored_products}
-            for candidate in rule_candidates:
-                if candidate['product_name'] in existing:
-                    continue
-                scored_products.append(candidate)
-                existing.add(candidate['product_name'])
-                if len(scored_products) >= MIN_RECOMMENDATIONS:
-                    break
+            # Fallback to Random Forest if LLM not available
+            rf_candidates = call_rf_recommendation(
+                age=age,
+                gender=gender,
+                raw_habits=raw_habits,
+                raw_conditions=raw_conditions,
+                raw_history=raw_history,
+                normalized_habits=habits,
+                normalized_conditions=conditions,
+                normalized_history=history,
+                current_diseases=current_diseases,
+                product_profile_map=product_profile_map,
+                product_disease_map=product_disease_map,
+            )
+            scored_products = [item for item in rf_candidates if item['final_score'] > MIN_SCORE_THRESHOLD]
+        
+        # No rule engine fallback - if neither LLM nor RF produce results, return empty
+        if not scored_products:
+            scored_products = []
 
         scored_products.sort(key=lambda x: x['final_score'], reverse=True)
 
@@ -684,6 +810,7 @@ class RecommendationAPIHandler(BaseHTTPRequestHandler):
 
 def run_server(port=None):
     init_llm_client()
+    init_rf_model()
 
     if port is None:
         port = int(os.environ.get('PORT', '5000'))
