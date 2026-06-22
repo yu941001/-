@@ -5,6 +5,8 @@ import os
 import socket
 import pickle
 import numpy as np
+import subprocess
+import atexit
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from typing import Any
@@ -20,6 +22,7 @@ BASE_DIR = Path(__file__).resolve().parent
 INDEX_FILE = BASE_DIR / 'index.html'
 DB_PATH = BASE_DIR / 'health_system.db'
 MODEL_PATH = BASE_DIR / 'recommendation_model.pkl'
+LOCK_FILE = BASE_DIR / 'app.pid'
 
 LLM_MODEL_NAME = os.environ.get('LLM_MODEL', 'gpt-4.1-mini')
 llm_client = None
@@ -29,6 +32,88 @@ rf_model = None
 rf_enabled = False
 rf_feature_shape = None
 rf_product_names = []
+rf_feature_metadata = None
+
+INFECTIOUS_INCLUDE_KEYWORDS = {
+    '流感', '腸病毒', '諾羅', '新冠', 'covid', '呼吸道融合', 'rsv',
+    '登革熱', '麻疹', '百日咳', '肺炎', '病毒', '傳染'
+}
+INFECTIOUS_EXCLUDE_KEYWORDS = {
+    '心血管', '三高', '高血脂', '高血壓', '糖尿病', '骨質疏鬆', '關節',
+    '食物中毒', '急性腸胃炎'
+}
+
+# ==================== PID Lock 機制 ====================
+def cleanup_old_process():
+    """檢查舊 lock 檔案，如果有舊進程在監聽 port 5000，則殺掉它"""
+    if not LOCK_FILE.exists():
+        return
+    
+    try:
+        with open(LOCK_FILE, 'r') as f:
+            old_pid = int(f.read().strip())
+        
+        # 用 netstat 檢查是否有其他進程在 port 5000 上
+        try:
+            result = subprocess.run(
+                ['netstat', '-ano'],
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+            lines = result.stdout.split('\n')
+            for line in lines:
+                if ':5000' in line and 'LISTENING' in line:
+                    parts = line.split()
+                    if parts:
+                        pid_str = parts[-1]
+                        try:
+                            pid = int(pid_str)
+                            if pid != os.getpid():  # 不要殺自己
+                                print(f"🔍 偵測到舊進程 PID {pid} 還在監聽 port 5000，正在清理...")
+                                subprocess.run(['taskkill', '/PID', str(pid), '/F'], 
+                                             capture_output=True, timeout=5)
+                                print(f"✅ 舊進程 PID {pid} 已清理")
+                        except (ValueError, subprocess.TimeoutExpired, Exception) as e:
+                            pass
+        except Exception as e:
+            print(f"⚠️  netstat 檢查失敗: {e}")
+    except Exception as e:
+        print(f"⚠️  讀取 lock 檔案失敗: {e}")
+
+
+def acquire_lock():
+    """寫入當前 PID 到 lock 檔案"""
+    try:
+        with open(LOCK_FILE, 'w') as f:
+            f.write(str(os.getpid()))
+        print(f"🔐 PID Lock 已獲得 (PID: {os.getpid()})")
+    except Exception as e:
+        print(f"❌ 無法寫入 lock 檔案: {e}")
+
+
+def release_lock():
+    """刪除 lock 檔案"""
+    try:
+        if LOCK_FILE.exists():
+            LOCK_FILE.unlink()
+            print(f"🔓 PID Lock 已釋放")
+    except Exception as e:
+        print(f"⚠️  無法刪除 lock 檔案: {e}")
+
+
+def is_recent_infectious_disease(disease_name: str) -> bool:
+    if not disease_name:
+        return False
+
+    normalized = disease_name.strip().lower()
+    if not normalized:
+        return False
+
+    if any(keyword in normalized for keyword in INFECTIOUS_EXCLUDE_KEYWORDS):
+        return False
+
+    return any(keyword in normalized for keyword in INFECTIOUS_INCLUDE_KEYWORDS)
 
 
 class RecommendationItem(BaseModel):
@@ -63,7 +148,7 @@ def init_llm_client():
 
 
 def init_rf_model():
-    global rf_model, rf_enabled, rf_feature_shape, rf_product_names
+    global rf_model, rf_enabled, rf_feature_shape, rf_product_names, rf_feature_metadata
     
     if not MODEL_PATH.exists():
         print(f'WARNING: Random Forest model not found at {MODEL_PATH}')
@@ -77,6 +162,7 @@ def init_rf_model():
         rf_model = model_data.get('model')
         rf_feature_shape = model_data.get('feature_shape')
         rf_product_names = model_data.get('product_names', [])
+        rf_feature_metadata = model_data.get('feature_metadata')
         
         if rf_model is not None:
             rf_enabled = True
@@ -369,7 +455,7 @@ def build_rule_based_candidates(
             summary_parts.extend(history_summaries)
 
         final_score = min(RULE_SCORE_CAP, rule_score)
-        if final_score <= MIN_SCORE_THRESHOLD:
+        if final_score < MIN_SCORE_THRESHOLD:
             continue
 
         if min_age > 0:
@@ -405,63 +491,83 @@ def call_rf_recommendation(
     product_disease_map: dict[str, list[str]],
 ):
     """用隨機森林模型進行推薦。"""
-    if not rf_enabled or rf_model is None or not rf_feature_shape:
+    if not rf_enabled or rf_model is None or not rf_feature_shape or not rf_feature_metadata:
         return []
 
     try:
+        # 使用模型中保存的特徵列表（確保與訓練時一致）
+        all_habits = rf_feature_metadata.get('all_habits', [])
+        all_conditions = rf_feature_metadata.get('all_conditions', [])
+        all_history = rf_feature_metadata.get('all_history', [])
+        
+        # 需要從資料庫獲取季節疾病列表（因為此列表在訓練時動態生成）
         conn = get_db_connection()
         cursor = conn.cursor()
-        cursor.execute('SELECT DISTINCT target_habits FROM products;')
-        all_habits_raw = set()
-        for row in cursor.fetchall():
-            habits_str = row[0] or ''
-            all_habits_raw.update([h.strip() for h in habits_str.split(',') if h.strip()])
-        
-        cursor.execute('SELECT DISTINCT target_conditions FROM products;')
-        all_conditions_raw = set()
-        for row in cursor.fetchall():
-            conditions_str = row[0] or ''
-            all_conditions_raw.update([c.strip() for c in conditions_str.split(',') if c.strip()])
-        
         cursor.execute('SELECT DISTINCT disease_name FROM seasonal_diseases;')
         all_diseases = [row[0] for row in cursor.fetchall()]
-        
         conn.close()
-
-        all_habits = sorted(all_habits_raw) if all_habits_raw else []
-        all_conditions = sorted(all_conditions_raw) if all_conditions_raw else []
         
         # 構建特徵向量（與 train_model.py 同步）
         gender_encoded = 1 if gender == '男' else 0
         habits_vec = [1 if h in normalized_habits else 0 for h in all_habits]
         conditions_vec = [1 if c in normalized_conditions else 0 for c in all_conditions]
-        history_vec = [1 if h in normalized_history else 0 for h in list(HISTORY_ALIAS_MAP.keys())]
+        history_vec = [1 if h in normalized_history else 0 for h in all_history]
         diseases_vec = [1 if d in current_diseases else 0 for d in all_diseases]
 
         feature_vector = np.array([[age, gender_encoded] + habits_vec + conditions_vec + history_vec + diseases_vec])
 
-        # 用模型預測所有產品的分數
+        # 用模型預測所有產品的分數（MultiOutputRegressor 返回 (1, num_products) 的數組）
         predictions = rf_model.predict(feature_vector)[0]
 
         results = []
-        for idx, product_name in enumerate(product_profile_map.keys()):
+        product_names_list = list(product_profile_map.keys())
+        
+        for idx, product_name in enumerate(product_names_list):
             if idx >= len(predictions):
                 break
             
             score = float(predictions[idx])
-            if score <= MIN_SCORE_THRESHOLD:
+            if score < MIN_SCORE_THRESHOLD:
                 continue
 
             min_age = product_profile_map[product_name].get('min_age', 0)
             if age < min_age:
                 continue
 
+            target_habits = product_profile_map[product_name].get('target_habits', [])
+            target_conditions = product_profile_map[product_name].get('target_conditions', [])
+            preventable_diseases = product_disease_map.get(product_name, [])
+
+            matched_habits = [h for h in normalized_habits if h in target_habits]
+            matched_conditions = [c for c in normalized_conditions if c in target_conditions]
+            matched_history = [
+                h for h in normalized_history
+                if any((h in d) or (d in h) for d in preventable_diseases)
+            ]
+
+            reason_parts = []
+            if matched_habits:
+                reason_parts.append(f"生活習慣符合：{'、'.join(matched_habits)}")
+            if matched_conditions:
+                reason_parts.append(f"健康困擾符合：{'、'.join(matched_conditions)}")
+            if matched_history:
+                reason_parts.append(f"病史關聯：{'、'.join(matched_history)}")
+
+            analysis_summary = (
+                '；'.join(reason_parts) + '。'
+                if reason_parts
+                else '根據你的年齡、生活習慣、健康困擾與病史特徵綜合評估後推薦此產品。'
+            )
+
             results.append({
                 'product_name': product_name,
                 'final_score': int(min(100, max(0, score))),
                 'ai_confidence': round(score / 100, 2),
                 'reasons': ['🌳 Random Forest 模型評估'],
-                'analysis_summary': f'Random Forest 模型根據你的特徵推薦此產品（評分：{score:.1f}/100）',
+                'analysis_summary': analysis_summary,
+                'raw_score': round(score, 1),
+                'score_method': 'Random Forest 基於特徵向量（年齡、性別、習慣、困擾、病史、季節疾病）預測評分 → 年齡篩選（使用者年齡 ≥ 產品建議年齡）→ 門檻過濾（分數 ≥ 35）→ 限制區間（0-100）。',
+                'min_age': min_age if min_age > 0 else None,
             })
 
         results.sort(key=lambda x: x['final_score'], reverse=True)
@@ -469,6 +575,8 @@ def call_rf_recommendation(
 
     except Exception as exc:
         print(f'WARNING: Random Forest prediction failed: {exc}')
+        import traceback
+        traceback.print_exc()
         return []
 
 
@@ -680,6 +788,41 @@ class RecommendationAPIHandler(BaseHTTPRequestHandler):
         )
         recent_rows = cursor.fetchall()
         current_diseases = list(dict.fromkeys([row['disease_name'] for row in recent_rows if row['disease_name']]))
+        infectious_recent_diseases = [
+            disease for disease in current_diseases if is_recent_infectious_disease(disease)
+        ]
+
+        cursor.execute(
+            '''
+            SELECT
+                disease_name,
+                SUM(CASE WHEN updated_at >= datetime('now', '-7 days') THEN 1 ELSE 0 END) AS current_7d_count,
+                SUM(CASE WHEN updated_at < datetime('now', '-7 days')
+                          AND updated_at >= datetime('now', '-14 days') THEN 1 ELSE 0 END) AS previous_7d_count
+            FROM seasonal_diseases
+            WHERE updated_at >= datetime('now', '-14 days')
+            GROUP BY disease_name
+            ORDER BY current_7d_count DESC;
+            '''
+        )
+        outbreak_diseases = []
+        for row in cursor.fetchall():
+            disease_name = row['disease_name']
+            if not disease_name or not is_recent_infectious_disease(disease_name):
+                continue
+
+            current_7d_count = int(row['current_7d_count'] or 0)
+            previous_7d_count = int(row['previous_7d_count'] or 0)
+
+            # 突發判定：近期量明顯上升，或近 7 天首次密集出現
+            is_outbreak = (
+                (previous_7d_count == 0 and current_7d_count >= 3)
+                or (previous_7d_count > 0 and current_7d_count >= previous_7d_count * 2 and (current_7d_count - previous_7d_count) >= 2)
+            )
+            if is_outbreak:
+                outbreak_diseases.append(disease_name)
+
+        alert_diseases = list(dict.fromkeys(outbreak_diseases + infectious_recent_diseases))
 
         cursor.execute("SELECT MAX(updated_at) AS latest_any_update FROM seasonal_diseases;")
         latest_any_update = cursor.fetchone()['latest_any_update']
@@ -755,7 +898,7 @@ class RecommendationAPIHandler(BaseHTTPRequestHandler):
             product_disease_map=product_disease_map,
         )
 
-        # Priority: LLM → Random Forest (no Rule Engine fallback)
+        # Priority: LLM → Random Forest → Rule Engine fallback
         scored_products = []
         
         # Try LLM first
@@ -775,25 +918,47 @@ class RecommendationAPIHandler(BaseHTTPRequestHandler):
         )
         
         if llm_candidates:
-            scored_products = [item for item in llm_candidates if item['final_score'] > MIN_SCORE_THRESHOLD]
-        else:
-            # Fallback to Random Forest if LLM not available
-            rf_candidates = call_rf_recommendation(
+            scored_products = [item for item in llm_candidates if item['final_score'] >= MIN_SCORE_THRESHOLD]
+        
+        # Try Random Forest if LLM didn't work
+        if not scored_products:
+                print(f'DEBUG: LLM returned {len(llm_candidates)} candidates')
+                rf_candidates = call_rf_recommendation(
+                    age=age,
+                    gender=gender,
+                    raw_habits=raw_habits,
+                    raw_conditions=raw_conditions,
+                    raw_history=raw_history,
+                    normalized_habits=habits,
+                    normalized_conditions=conditions,
+                    normalized_history=history,
+                    current_diseases=current_diseases,
+                    product_profile_map=product_profile_map,
+                    product_disease_map=product_disease_map,
+                )
+                print(f'DEBUG: Random Forest returned {len(rf_candidates)} candidates')
+                scored_products = [item for item in rf_candidates if item['final_score'] >= MIN_SCORE_THRESHOLD]
+                print(f'DEBUG: RF candidates filtered to {len(scored_products)} products')
+        
+        # Rule Engine fallback if neither LLM nor RF produce results
+        if not scored_products:
+            rule_candidates = build_rule_based_candidates(
                 age=age,
-                gender=gender,
                 raw_habits=raw_habits,
                 raw_conditions=raw_conditions,
                 raw_history=raw_history,
-                normalized_habits=habits,
-                normalized_conditions=conditions,
-                normalized_history=history,
+                habits=habits,
+                conditions=conditions,
+                history=history,
                 current_diseases=current_diseases,
+                season_feature_map=season_feature_map,
                 product_profile_map=product_profile_map,
                 product_disease_map=product_disease_map,
             )
-            scored_products = [item for item in rf_candidates if item['final_score'] > MIN_SCORE_THRESHOLD]
+            print(f'DEBUG: Rule Engine returned {len(rule_candidates)} candidates')
+            scored_products = [item for item in rule_candidates if item['final_score'] >= MIN_SCORE_THRESHOLD]
+            print(f'DEBUG: Rule candidates filtered to {len(scored_products)} products')
         
-        # No rule engine fallback - if neither LLM nor RF produce results, return empty
         if not scored_products:
             scored_products = []
 
@@ -801,7 +966,9 @@ class RecommendationAPIHandler(BaseHTTPRequestHandler):
 
         return {
             'current_month': current_month,
-            'detected_seasonal_diseases': current_diseases,
+            'detected_seasonal_diseases': alert_diseases,
+            'detected_infectious_diseases': infectious_recent_diseases,
+            'detected_outbreak_diseases': outbreak_diseases,
             'seasonal_data_freshness': seasonal_data_freshness,
             'user_analysis': user_profile,
             'recommendations': scored_products,
@@ -830,4 +997,17 @@ def run_server(port=None):
 
 
 if __name__ == '__main__':
+    print("=" * 60)
+    print("🚀 正在啟動健康產品推薦系統...")
+    print("=" * 60)
+    
+    # 清理舊進程
+    cleanup_old_process()
+    
+    # 獲取 lock
+    acquire_lock()
+    
+    # 註冊程式結束時的清理函數
+    atexit.register(release_lock)
+    
     run_server()

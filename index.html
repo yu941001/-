@@ -334,6 +334,24 @@
             margin-top: 8px;
         }
 
+        .model-eval-tag {
+            display: inline-flex;
+            flex-direction: column;
+            gap: 6px;
+            background: #ffffff;
+            color: #334155;
+            padding: 10px 14px;
+            border-radius: 10px;
+            font-size: 0.88rem;
+            margin-right: 8px;
+            margin-bottom: 8px;
+            font-weight: 600;
+            border: 2px solid #c7d2fe;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.02);
+            white-space: normal;
+            line-height: 1.55;
+        }
+
         @media (max-width: 768px) {
             body {
                 padding: 15px 10px;
@@ -424,6 +442,95 @@
                 margin-bottom: 4px;
                 display: inline-block;
             }
+        }
+
+        /* 美觀的互斥提示 Modal */
+        .modal-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.5);
+            backdrop-filter: blur(4px);
+            z-index: 1000;
+            animation: fadeIn 0.3s ease;
+        }
+
+        .modal-overlay.show {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+
+        @keyframes slideInUp {
+            from {
+                opacity: 0;
+                transform: translateY(30px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .modal-content {
+            background: white;
+            border-radius: 20px;
+            padding: 40px;
+            max-width: 500px;
+            width: 90%;
+            box-shadow: 0 25px 50px rgba(0, 0, 0, 0.3);
+            animation: slideInUp 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            text-align: center;
+        }
+
+        .modal-icon {
+            font-size: 4rem;
+            margin-bottom: 20px;
+        }
+
+        .modal-title {
+            font-size: 1.6rem;
+            font-weight: 800;
+            color: #ff4081;
+            margin-bottom: 16px;
+            line-height: 1.4;
+        }
+
+        .modal-message {
+            font-size: 1.1rem;
+            color: #475569;
+            margin-bottom: 30px;
+            line-height: 1.6;
+        }
+
+        .modal-button {
+            background: linear-gradient(90deg, #ff4081 0%, #ff6f00 100%);
+            color: white;
+            border: none;
+            padding: 14px 40px;
+            font-size: 1.1rem;
+            font-weight: 700;
+            border-radius: 12px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            box-shadow: 0 8px 20px rgba(255, 64, 129, 0.3);
+        }
+
+        .modal-button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 12px 30px rgba(255, 64, 129, 0.4);
+        }
+
+        .modal-button:active {
+            transform: translateY(0);
         }
     </style>
 </head>
@@ -518,6 +625,12 @@
         </div>
 
         <h2 style="font-weight: 800; color: #1e293b; margin-bottom: 15px;">🌟 專屬調配！最適合你的補給排行</h2>
+        <div id="model-eval-info" style="display: none; margin-bottom: 20px; padding: 12px 15px; background: #f0f9ff; border-left: 4px solid #3b82f6; border-radius: 4px;">
+            <span style="color: #1e293b; font-size: 14px; line-height: 1.6;">
+                🌳 <strong>Random Forest 模型評估</strong><br>
+                📊 <strong>評分方式</strong>：<span id="score-method-display"></span>
+            </span>
+        </div>
         <div class="product-list" id="product-list-container">
             </div>
     </div>
@@ -543,6 +656,24 @@
         
         const habits = [];
         document.querySelectorAll('#habits-grid input:checked').forEach(cb => habits.push(cb.value));
+        
+        // 互斥習慣檢查（完整版）
+        const mutuallyExclusive = [
+            // 體能活動相關
+            {habit1: '勞力工作', habit2: '久坐'},
+            {habit1: '勞力工作', habit2: '少運動'},
+            {habit1: '久坐', habit2: '運動量大'},
+            {habit1: '健身', habit2: '少運動'},
+            {habit1: '健身', habit2: '久坐'},
+            {habit1: '運動量大', habit2: '少運動'},
+        ];
+        
+        for (let check of mutuallyExclusive) {
+            if (habits.includes(check.habit1) && habits.includes(check.habit2)) {
+                showModal('⚠️', '選項互斥', '您的選項互斥，請重新選擇');
+                return;  // 停止提交，讓用戶重新選擇
+            }
+        }
         
         const conditions = [];
         document.querySelectorAll('#conditions-grid input:checked').forEach(cb => conditions.push(cb.value));
@@ -591,9 +722,11 @@
 
         const freshness = data.seasonal_data_freshness || {};
         const recentUpdateText = freshness.latest_recent_update || freshness.latest_any_update || '無資料';
+        const infectiousDiseases = data.detected_infectious_diseases || data.detected_seasonal_diseases || [];
+        const outbreakDiseases = data.detected_outbreak_diseases || [];
 
-        if (freshness.has_recent_data && data.detected_seasonal_diseases.length > 0) {
-            document.getElementById('seasonal-diseases-text').innerText = `🚨 近期環境高風險：${data.detected_seasonal_diseases.join('、')}。資料新鮮度：最近 ${freshness.window_days} 天內有效，最新更新 ${recentUpdateText}。`;
+        if (freshness.has_recent_data && infectiousDiseases.length > 0) {
+            document.getElementById('seasonal-diseases-text').innerText = `🚨 近期流行疾病/傳染病：${infectiousDiseases.join('、')}。資料新鮮度：最近 ${freshness.window_days} 天內有效，最新更新 ${recentUpdateText}。`;
         } else if (freshness.status === 'stale') {
             document.getElementById('seasonal-diseases-text').innerText = `⏳ 近期資料不足：最近 ${freshness.window_days} 天未更新，最新可用資料時間為 ${recentUpdateText}。`;
         } else {
@@ -633,25 +766,41 @@
             return;
         }
 
+        // 顯示模型評估信息
+        const modelEvalInfo = document.getElementById('model-eval-info');
+        const scoreMethodDisplay = document.getElementById('score-method-display');
+        if (data.recommendations.length > 0 && data.recommendations[0].score_method) {
+            modelEvalInfo.style.display = 'block';
+            scoreMethodDisplay.textContent = data.recommendations[0].score_method;
+        }
+
         data.recommendations.forEach((item, index) => {
             const card = document.createElement('div');
             card.className = `product-card rank-${index}`;
             
             let reasonsHTML = '';
             item.reasons.forEach(reason => {
+                if (reason === '🌳 Random Forest 模型評估') {
+                    return;
+                }
                 reasonsHTML += `<span class="reason-tag">${reason}</span>`;
             });
 
             const confidence = item.ai_confidence ? Math.round(item.ai_confidence * 100) : null;
-            const analysisText = item.analysis_summary
-                ? `✅ ${item.analysis_summary}`
+            const cleanSummary = (item.analysis_summary || '').trim();
+            const analysisText = cleanSummary
+                ? `✅ ${cleanSummary}`
                 : `✅ 主要根據 AI 分析相容度${confidence !== null ? ` ${confidence}%` : ''}與整體填答資料進行推薦。`;
+            const minAgeText = (item.min_age !== undefined && item.min_age !== null && item.min_age !== '')
+                ? `<span class="reason-tag">📌 產品建議年齡：${item.min_age} 歲以上</span>`
+                : '';
 
             card.innerHTML = `
                 <span class="score-badge">推薦指數: ${item.final_score} 分</span>
                 <div class="product-name">✨ TOP ${index + 1}：${item.product_name}</div>
                 <div class="product-reasons">
                     ${reasonsHTML}
+                    ${minAgeText}
                 </div>
                 <div class="analysis-summary">${analysisText}</div>
             `;
@@ -661,7 +810,48 @@
 
         document.getElementById('result-section').scrollIntoView({ behavior: 'smooth' });
     }
+
+    // ==================== Modal 提示系統 ====================
+    function showModal(icon, title, message) {
+        const overlay = document.getElementById('modal-overlay');
+        const iconEl = document.getElementById('modal-icon');
+        const titleEl = document.getElementById('modal-title');
+        const messageEl = document.getElementById('modal-message');
+        
+        iconEl.textContent = icon;
+        titleEl.textContent = title;
+        messageEl.textContent = message;
+        
+        overlay.classList.add('show');
+    }
+
+    function closeModal() {
+        const overlay = document.getElementById('modal-overlay');
+        overlay.classList.remove('show');
+    }
+
+    // 點擊 overlay 或按鈕時關閉
+    document.addEventListener('DOMContentLoaded', function() {
+        const overlay = document.getElementById('modal-overlay');
+        const button = document.getElementById('modal-button');
+        
+        overlay.addEventListener('click', function(e) {
+            if (e.target === overlay) closeModal();
+        });
+        
+        button.addEventListener('click', closeModal);
+    });
 </script>
+
+<!-- 互斥提示 Modal -->
+<div id="modal-overlay" class="modal-overlay">
+    <div class="modal-content">
+        <div id="modal-icon" class="modal-icon">⚠️</div>
+        <div id="modal-title" class="modal-title">選項互斥</div>
+        <div id="modal-message" class="modal-message">請重新選擇</div>
+        <button id="modal-button" class="modal-button">我知道了</button>
+    </div>
+</div>
 
 </body>
 </html>
