@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Secrets (never commit API keys)
+.env
+*.env
+
+# Database (local data, not for version control)
+health_system.db
+
+# OS
+desktop.ini
+Thumbs.db
+.DS_Store
