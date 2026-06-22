@@ -15,6 +15,11 @@ env/
 # Database (local data, not for version control)
 health_system.db
 
+# Model and runtime artifacts
+recommendation_model.pkl
+cdc_main_content.txt
+crawler_check.log
+
 # OS
 desktop.ini
 Thumbs.db
