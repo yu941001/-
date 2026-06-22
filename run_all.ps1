@@ -83,5 +83,5 @@ Invoke-Step -Title 'Start web server' -Action {
     }
 
     Write-Host 'Server will now start and keep running. Press Ctrl+C to stop.' -ForegroundColor Green
-    & $startServerScript
+    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $startServerScript
 }
