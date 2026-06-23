@@ -245,6 +245,33 @@
             font-weight: 800;
         }
 
+        .safety-panel {
+            background: linear-gradient(180deg, rgba(255, 248, 238, 0.95), rgba(255, 255, 255, 0.95));
+            border: 2px solid #fbbf24;
+            border-radius: var(--radius);
+            padding: 18px 20px;
+            margin-bottom: 24px;
+            box-shadow: var(--shadow);
+        }
+
+        .safety-panel h3 {
+            font-size: 1.1rem;
+            margin-bottom: 12px;
+            color: #92400e;
+            font-weight: 800;
+        }
+
+        .safety-panel ul {
+            margin: 0;
+            padding-left: 20px;
+            color: #475569;
+            line-height: 1.7;
+        }
+
+        .safety-panel li {
+            margin-bottom: 8px;
+        }
+
         .analysis-grid {
             display: grid;
             grid-template-columns: 1fr;
@@ -332,6 +359,32 @@
             color: #475569;
             line-height: 1.6;
             margin-top: 8px;
+        }
+
+        .warning-box {
+            margin-top: 10px;
+            padding: 12px 14px;
+            border-radius: 12px;
+            border: 1px solid #f59e0b;
+            background: #fff8eb;
+            color: #92400e;
+        }
+
+        .warning-box h4 {
+            margin-bottom: 8px;
+            font-size: 0.95rem;
+            font-weight: 800;
+        }
+
+        .warning-box ul {
+            padding-left: 18px;
+            margin: 0;
+            line-height: 1.6;
+            font-size: 0.88rem;
+        }
+
+        .warning-box li + li {
+            margin-top: 6px;
         }
 
         .model-eval-tag {
@@ -794,6 +847,16 @@
             const minAgeText = (item.min_age !== undefined && item.min_age !== null && item.min_age !== '')
                 ? `<span class="reason-tag">📌 產品建議年齡：${item.min_age} 歲以上</span>`
                 : '';
+            const warnings = Array.isArray(item.warnings) ? item.warnings : [];
+            const warningHTML = warnings.length > 0
+                ? `
+                <div class="warning-box">
+                    <h4>⚠️ 這個產品要注意</h4>
+                    <ul>
+                        ${warnings.map(warning => `<li>${warning}</li>`).join('')}
+                    </ul>
+                </div>`
+                : '';
 
             card.innerHTML = `
                 <span class="score-badge">推薦指數: ${item.final_score} 分</span>
@@ -803,6 +866,7 @@
                     ${minAgeText}
                 </div>
                 <div class="analysis-summary">${analysisText}</div>
+                ${warningHTML}
             `;
             
             container.appendChild(card);

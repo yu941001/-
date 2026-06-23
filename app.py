@@ -306,6 +306,31 @@ EXTRA_HISTORY_KEYWORDS = {
 }
 
 
+def get_product_warnings(product_name: str) -> list[str]:
+    normalized_name = (product_name or '').strip()
+    warnings: list[str] = []
+
+    warning_rules = [
+        (['紅麴'], '若正在使用降血脂藥、抗凝血藥，或有肝功能問題，先問醫師。'),
+        (['納豆激酶'], '若正在使用抗凝血藥、即將手術，或有出血風險，先問醫師。'),
+        (['深海魚油'], '若正在使用抗凝血藥、即將手術，或容易瘀青出血，先問醫師。'),
+        (['魚油'], '若正在使用抗凝血藥、即將手術，或容易瘀青出血，先問醫師。'),
+        (['鐵補充劑'], '鐵不是越多越好，建議先確認是否真的缺鐵。'),
+        (['鋅補充劑'], '鋅不要長期過量補充，可能影響銅吸收。'),
+        (['鈣D3'], '鈣與維他命D不是越多越好，腎結石或腎功能問題者先問醫師。'),
+        (['益生菌'], '重點是菌株與用途，不是越貴越有效。'),
+        (['綜合維他命'], '如果飲食均衡，額外補充的必要性有限。'),
+        (['B群', '維他命C', '乳鐵蛋白', '靈芝', '黑蒜', '牛樟芝', '蜂膠', '紫錐花'], '這類產品多屬營養補充，通常不是直接治療疲勞或免疫低下的原因。'),
+    ]
+
+    for keywords, message in warning_rules:
+        if any(keyword in normalized_name for keyword in keywords):
+            if message not in warnings:
+                warnings.append(message)
+
+    return warnings
+
+
 def expand_with_aliases(items, alias_map):
     expanded = set(items)
     for item in list(expanded):
@@ -413,10 +438,16 @@ def build_rule_based_candidates(
             matched_text = '、'.join(matched_history)
             matching_reasons.append(f'🛡️ 病史關聯：{matched_text}')
 
+        matched_seasonal = []
         for disease in preventable:
             if disease in current_diseases:
                 rule_score += 25
+                matched_seasonal.append(disease)
                 matching_reasons.append(f'🌍 季節防護命中：{disease}')
+        
+        if matched_seasonal:
+            matched_text = '、'.join(matched_seasonal)
+            summary_parts.append(f'近期流行疾病「{matched_text}」本月具高風險，產品有預防效果')
 
         habit_bonus, habit_reasons, habit_summaries = score_extra_options(
             raw_habits,
@@ -552,6 +583,11 @@ def call_rf_recommendation(
                 reason_parts.append(f"健康困擾符合：{'、'.join(matched_conditions)}")
             if matched_history:
                 reason_parts.append(f"病史關聯：{'、'.join(matched_history)}")
+            
+            # 添加近期流行疾病說明
+            matched_seasonal = [d for d in preventable_diseases if d in current_diseases]
+            if matched_seasonal:
+                reason_parts.append(f"近期流行疾病「{'、'.join(matched_seasonal)}」本月具高風險，產品有預防效果")
 
             analysis_summary = (
                 '；'.join(reason_parts) + '。'
@@ -565,6 +601,7 @@ def call_rf_recommendation(
                 'ai_confidence': round(score / 100, 2),
                 'reasons': ['🌳 Random Forest 模型評估'],
                 'analysis_summary': analysis_summary,
+                'warnings': get_product_warnings(product_name),
                 'raw_score': round(score, 1),
                 'score_method': 'Random Forest 基於特徵向量（年齡、性別、習慣、困擾、病史、季節疾病）預測評分 → 年齡篩選（使用者年齡 ≥ 產品建議年齡）→ 門檻過濾（分數 ≥ 35）→ 限制區間（0-100）。',
                 'min_age': min_age if min_age > 0 else None,
@@ -685,6 +722,7 @@ def call_llm_recommendation(
                 'ai_confidence': item.ai_confidence,
                 'reasons': item.reasons or ['🤖 LLM 綜合評估'],
                 'analysis_summary': item.analysis_summary,
+                'warnings': get_product_warnings(product_name),
             }
         )
 
