@@ -6,6 +6,6 @@ services:
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.9
-    buildCommand: ""
+    buildCommand: "pip install -r requirements.txt && python import_products.py && python train_model.py"
     startCommand: "python app.py"
     autoDeploy: true
