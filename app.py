@@ -24,7 +24,7 @@ DB_PATH = BASE_DIR / 'health_system.db'
 MODEL_PATH = BASE_DIR / 'recommendation_model.pkl'
 LOCK_FILE = BASE_DIR / 'app.pid'
 
-LLM_MODEL_NAME = os.environ.get('LLM_MODEL', 'gpt-4.1-mini')
+LLM_MODEL_NAME = os.environ.get('LLM_MODEL', 'gpt-4-mini')
 llm_client = None
 llm_enabled = False
 
