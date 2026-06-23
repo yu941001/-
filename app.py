@@ -306,27 +306,46 @@ EXTRA_HISTORY_KEYWORDS = {
 }
 
 
-def get_product_warnings(product_name: str) -> list[str]:
+def get_product_warnings(
+    product_name: str,
+    normalized_habits: list[str] | None = None,
+    normalized_conditions: list[str] | None = None,
+    normalized_history: list[str] | None = None,
+) -> list[str]:
+    """取得產品警示。分為必要安全警示（無條件顯示）與條件性提示（基於用戶選填）。"""
     normalized_name = (product_name or '').strip()
     warnings: list[str] = []
 
-    warning_rules = [
+    # 必要安全警示 - 無條件顯示
+    mandatory_warnings = [
         (['紅麴'], '若正在使用降血脂藥、抗凝血藥，或有肝功能問題，先問醫師。'),
         (['納豆激酶'], '若正在使用抗凝血藥、即將手術，或有出血風險，先問醫師。'),
-        (['深海魚油'], '若正在使用抗凝血藥、即將手術，或容易瘀青出血，先問醫師。'),
-        (['魚油'], '若正在使用抗凝血藥、即將手術，或容易瘀青出血，先問醫師。'),
+        (['深海魚油', '魚油'], '若正在使用抗凝血藥、即將手術，或容易瘀青出血，先問醫師。'),
         (['鐵補充劑'], '鐵不是越多越好，建議先確認是否真的缺鐵。'),
         (['鋅補充劑'], '鋅不要長期過量補充，可能影響銅吸收。'),
         (['鈣D3'], '鈣與維他命D不是越多越好，腎結石或腎功能問題者先問醫師。'),
-        (['益生菌'], '重點是菌株與用途，不是越貴越有效。'),
-        (['綜合維他命'], '如果飲食均衡，額外補充的必要性有限。'),
-        (['B群', '維他命C', '乳鐵蛋白', '靈芝', '黑蒜', '牛樟芝', '蜂膠', '紫錐花'], '這類產品多屬營養補充，通常不是直接治療疲勞或免疫低下的原因。'),
     ]
 
-    for keywords, message in warning_rules:
-        if any(keyword in normalized_name for keyword in keywords):
-            if message not in warnings:
-                warnings.append(message)
+    for keywords, message in mandatory_warnings:
+        if message not in warnings and any(keyword in normalized_name for keyword in keywords):
+            warnings.append(message)
+
+    # 條件性提示 - 只在用戶選填相關項時顯示
+    if normalized_habits or normalized_conditions or normalized_history:
+        selected_values = (normalized_habits or []) + (normalized_conditions or []) + (normalized_history or [])
+        selected_text = ' '.join(selected_values)
+
+        conditional_warnings = [
+            (['益生菌'], ['排便不順', '消化不良', '過敏體質', '腹瀉'], '重點是菌株與用途，不是越貴越有效。'),
+            (['綜合維他命'], ['外食', '飲食不規律', '熬夜', '壓力大'], '如果飲食均衡，額外補充的必要性有限。'),
+            (['B群', '維他命C', '乳鐵蛋白', '靈芝', '黑蒜', '牛樟芝', '蜂膠', '紫錐花', 'GABA'], ['容易疲勞', '體能不佳', '免疫力低下', '常感冒/免疫差', '睡眠品質不佳'], '這類產品多屬營養補充，通常不是直接治療疲勞或免疫低下的原因。'),
+        ]
+
+        for product_keywords, trigger_keywords, message in conditional_warnings:
+            if any(keyword in normalized_name for keyword in product_keywords):
+                if any(trigger in selected_text for trigger in trigger_keywords):
+                    if message not in warnings:
+                        warnings.append(message)
 
     return warnings
 
@@ -601,7 +620,7 @@ def call_rf_recommendation(
                 'ai_confidence': round(score / 100, 2),
                 'reasons': ['🌳 Random Forest 模型評估'],
                 'analysis_summary': analysis_summary,
-                'warnings': get_product_warnings(product_name),
+                'warnings': get_product_warnings(product_name, normalized_habits, normalized_conditions, normalized_history),
                 'raw_score': round(score, 1),
                 'score_method': 'Random Forest 基於特徵向量（年齡、性別、習慣、困擾、病史、季節疾病）預測評分 → 年齡篩選（使用者年齡 ≥ 產品建議年齡）→ 門檻過濾（分數 ≥ 35）→ 限制區間（0-100）。',
                 'min_age': min_age if min_age > 0 else None,
@@ -722,7 +741,7 @@ def call_llm_recommendation(
                 'ai_confidence': item.ai_confidence,
                 'reasons': item.reasons or ['🤖 LLM 綜合評估'],
                 'analysis_summary': item.analysis_summary,
-                'warnings': get_product_warnings(product_name),
+                'warnings': get_product_warnings(product_name, normalized_habits, normalized_conditions, normalized_history),
             }
         )
 
