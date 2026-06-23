@@ -20,6 +20,12 @@ recommendation_model.pkl
 cdc_main_content.txt
 crawler_check.log
 
+# Runtime / temp files
+app.pid
+app_error.txt
+app_output.txt
+test.py
+
 # OS
 desktop.ini
 Thumbs.db
