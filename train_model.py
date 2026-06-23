@@ -1,5 +1,4 @@
 import sqlite3
-import json
 import numpy as np
 from pathlib import Path
 from typing import Any, Tuple
@@ -7,194 +6,26 @@ from sklearn.ensemble import RandomForestRegressor
 from sklearn.multioutput import MultiOutputRegressor
 import pickle
 
+from config import (
+    HABIT_ALIAS_MAP,
+    CONDITION_ALIAS_MAP,
+    HISTORY_ALIAS_MAP,
+    MIN_SCORE_THRESHOLD,
+    RULE_SCORE_CAP,
+    DEFAULT_TRAINING_SAMPLES,
+    REAL_DATA_TABLE_CANDIDATES,
+    HISTORY_TO_KEYWORDS,
+)
+from utils import (
+    expand_with_aliases,
+    calculate_rule_score,
+    parse_list_field,
+    parse_product_scores_field,
+)
+
 BASE_DIR = Path(__file__).resolve().parent
 DB_PATH = BASE_DIR / 'health_system.db'
 MODEL_PATH = BASE_DIR / 'recommendation_model.pkl'
-
-# 規則引擎的別名與關鍵字定義（與 app.py 同步）
-HABIT_ALIAS_MAP = {
-    '久坐': ['少運動'],
-    '睡眠不足': ['熬夜'],
-    '飲食不規律': ['外食'],
-}
-
-CONDITION_ALIAS_MAP = {
-    '過敏體質': ['免疫力低下'],
-    '睡眠品質不佳': ['容易疲勞'],
-    '消化不良': ['排便不順'],
-    '體能不佳': ['容易疲勞'],
-}
-
-HISTORY_ALIAS_MAP = {
-    '新冠肺炎': ['流感'],
-    '腸病毒': ['腹瀉'],
-    '諾羅病毒': ['腹瀉'],
-    '登革熱': ['流感'],
-    '骨質疏鬆': ['心血管'],
-    '失眠': ['流感'],
-}
-
-EXTRA_HABIT_KEYWORDS = {
-    '久坐': ['少運動', '關節', '心血管', '三高', '循環'],
-    '睡眠不足': ['睡眠', '失眠', '疲勞', 'B群', '鎂'],
-    '飲食不規律': ['外食', '消化', '腸胃', '益生菌', '消化酵素'],
-}
-
-EXTRA_CONDITION_KEYWORDS = {
-    '過敏體質': ['過敏', '鼻炎', '氣喘', '益生菌'],
-    '三高風險': ['心血管', '高血脂', '紅麴', '魚油', '輔酶Q10'],
-    '睡眠品質不佳': ['失眠', '睡眠', '鎂', 'B群', '疲勞'],
-}
-
-EXTRA_HISTORY_KEYWORDS = {
-    '新冠肺炎': ['新冠', '呼吸道', '流感', '免疫'],
-    '失眠': ['失眠', '睡眠', '疲勞', '鎂', 'B群'],
-}
-
-HISTORY_TO_KEYWORDS = {
-    '流感': ['流感', '感冒', '呼吸道'],
-    '腹瀉': ['腹瀉', '腸胃炎', '食物中毒'],
-    '過敏': ['過敏', '鼻炎', '氣喘'],
-    '心血管': ['心血管', '高血脂', '三高'],
-}
-
-MIN_SCORE_THRESHOLD = 35
-RULE_SCORE_CAP = 100
-DEFAULT_TRAINING_SAMPLES = 1000
-REAL_DATA_TABLE_CANDIDATES = [
-    'real_training_data',
-    'training_samples',
-    'user_training_samples',
-]
-
-
-def expand_with_aliases(items, alias_map):
-    expanded = set(items)
-    for item in list(expanded):
-        for alias in alias_map.get(item, []):
-            expanded.add(alias)
-    return list(expanded)
-
-
-def build_product_search_text(prod_name, target_habits, target_conditions, preventable_diseases):
-    habits_text = ' '.join(target_habits)
-    conditions_text = ' '.join(target_conditions)
-    disease_text = ' '.join(preventable_diseases)
-    return f'{prod_name} {habits_text} {conditions_text} {disease_text}'
-
-
-def calculate_rule_score(
-    age: int,
-    habits: list[str],
-    conditions: list[str],
-    history: list[str],
-    current_diseases: list[str],
-    product_name: str,
-    target_habits: list[str],
-    target_conditions: list[str],
-    preventable_diseases: list[str],
-    min_age: int,
-) -> float:
-    """用規則引擎計算產品推薦分數。"""
-    if age < min_age:
-        return 0.0
-
-    rule_score = 0
-
-    # 習慣匹配
-    matched_habits = [h for h in habits if h in target_habits]
-    if matched_habits:
-        bonus = 8 + len(matched_habits) * 2
-        rule_score += bonus
-
-    # 困擾匹配
-    matched_conditions = [c for c in conditions if c in target_conditions]
-    if matched_conditions:
-        bonus = 10 + len(matched_conditions) * 2
-        rule_score += bonus
-
-    # 病史關聯
-    matched_history = []
-    for h in history:
-        keywords = HISTORY_TO_KEYWORDS.get(h, [])
-        if any(any(k in disease for k in keywords) for disease in preventable_diseases):
-            matched_history.append(h)
-
-    if matched_history:
-        rule_score += 20
-
-    # 季節疾病命中
-    for disease in preventable_diseases:
-        if disease in current_diseases:
-            rule_score += 25
-
-    # 延伸習慣關聯
-    product_search_text = build_product_search_text(product_name, target_habits, target_conditions, preventable_diseases)
-    for item in habits:
-        keywords = EXTRA_HABIT_KEYWORDS.get(item, [])
-        hits = [k for k in keywords if k in product_search_text]
-        if hits:
-            bonus = 4 + min(4, len(hits))
-            rule_score += bonus
-
-    # 延伸困擾關聯
-    for item in conditions:
-        keywords = EXTRA_CONDITION_KEYWORDS.get(item, [])
-        hits = [k for k in keywords if k in product_search_text]
-        if hits:
-            bonus = 4 + min(4, len(hits))
-            rule_score += bonus
-
-    return min(RULE_SCORE_CAP, rule_score)
-
-
-def parse_list_field(value: Any) -> list[str]:
-    """將 JSON/CSV/純字串轉為字串陣列。"""
-    if value is None:
-        return []
-    if isinstance(value, list):
-        return [str(item).strip() for item in value if str(item).strip()]
-    if isinstance(value, str):
-        text = value.strip()
-        if not text:
-            return []
-        if text.startswith('['):
-            try:
-                arr = json.loads(text)
-                if isinstance(arr, list):
-                    return [str(item).strip() for item in arr if str(item).strip()]
-            except json.JSONDecodeError:
-                pass
-        return [item.strip() for item in text.split(',') if item.strip()]
-    return []
-
-
-def parse_product_scores_field(value: Any) -> dict[str, float]:
-    """將產品分數欄位轉為 {product_name: score}。"""
-    if value is None:
-        return {}
-
-    if isinstance(value, dict):
-        return {str(k): float(v) for k, v in value.items()}
-
-    if isinstance(value, str):
-        text = value.strip()
-        if not text:
-            return {}
-        try:
-            parsed = json.loads(text)
-            if isinstance(parsed, dict):
-                result = {}
-                for key, score in parsed.items():
-                    try:
-                        result[str(key)] = float(score)
-                    except (TypeError, ValueError):
-                        continue
-                return result
-        except json.JSONDecodeError:
-            return {}
-
-    return {}
 
 
 def load_real_training_data(

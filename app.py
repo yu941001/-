@@ -743,6 +743,34 @@ class RecommendationAPIHandler(BaseHTTPRequestHandler):
         self.send_header('Access-Control-Allow-Headers', 'Content-Type')
         self.end_headers()
 
+    def _validate_recommend_request(self, user_input):
+        required_fields = ['age', 'gender', 'habits', 'conditions', 'history']
+        missing_fields = [field for field in required_fields if field not in user_input]
+        if missing_fields:
+            raise ValueError(f"缺少必要欄位: {', '.join(missing_fields)}")
+
+        try:
+            user_age = int(user_input['age'])
+        except (TypeError, ValueError) as exc:
+            raise ValueError('age 必須為整數') from exc
+
+        user_gender = user_input['gender']
+        if not isinstance(user_gender, str) or not user_gender.strip():
+            raise ValueError('gender 必須為非空字串')
+
+        user_habits = user_input['habits']
+        user_conditions = user_input['conditions']
+        user_history = user_input['history']
+
+        if not isinstance(user_habits, list):
+            raise ValueError('habits 必須為陣列')
+        if not isinstance(user_conditions, list):
+            raise ValueError('conditions 必須為陣列')
+        if not isinstance(user_history, list):
+            raise ValueError('history 必須為陣列')
+
+        return user_age, user_gender, user_habits, user_conditions, user_history
+
     def do_POST(self):
         if self.path == '/api/recommend':
             try:
@@ -750,16 +778,14 @@ class RecommendationAPIHandler(BaseHTTPRequestHandler):
                 post_data = self.rfile.read(content_length)
                 user_input = json.loads(post_data.decode('utf-8'))
 
-                user_age = int(user_input.get('age', 0))
-                user_gender = user_input.get('gender', '男')
-                user_habits = user_input.get('habits', [])
-                user_conditions = user_input.get('conditions', [])
-                user_history = user_input.get('history', [])
+                user_age, user_gender, user_habits, user_conditions, user_history = self._validate_recommend_request(user_input)
 
                 recommend_results = self.calculate_recommendations(
                     user_age, user_gender, user_habits, user_conditions, user_history
                 )
                 self._send_json(200, recommend_results)
+            except (json.JSONDecodeError, ValueError) as exc:
+                self._send_json(400, {'error': str(exc), 'message': '請檢查請求參數格式'})
             except Exception as exc:
                 self._send_json(500, {'error': str(exc), 'message': '後端推薦計算失敗'})
         else:
@@ -898,10 +924,9 @@ class RecommendationAPIHandler(BaseHTTPRequestHandler):
             product_disease_map=product_disease_map,
         )
 
-        # Priority: LLM → Random Forest → Rule Engine fallback
+        # 推薦優先順序：LLM → Random Forest → Rule Engine
         scored_products = []
-        
-        # Try LLM first
+
         llm_candidates = call_llm_recommendation(
             age=age,
             gender=gender,
@@ -920,7 +945,6 @@ class RecommendationAPIHandler(BaseHTTPRequestHandler):
         if llm_candidates:
             scored_products = [item for item in llm_candidates if item['final_score'] >= MIN_SCORE_THRESHOLD]
         
-        # Try Random Forest if LLM didn't work
         if not scored_products:
                 print(f'DEBUG: LLM returned {len(llm_candidates)} candidates')
                 rf_candidates = call_rf_recommendation(
@@ -940,7 +964,6 @@ class RecommendationAPIHandler(BaseHTTPRequestHandler):
                 scored_products = [item for item in rf_candidates if item['final_score'] >= MIN_SCORE_THRESHOLD]
                 print(f'DEBUG: RF candidates filtered to {len(scored_products)} products')
         
-        # Rule Engine fallback if neither LLM nor RF produce results
         if not scored_products:
             rule_candidates = build_rule_based_candidates(
                 age=age,

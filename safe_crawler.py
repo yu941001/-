@@ -43,7 +43,6 @@ def build_ssl_context() -> ssl.SSLContext:
     建立 SSL Context
     政府 API 的 SSL 配置特殊，優先使用不驗證模式確保連接穩定
     """
-    # 優先使用不驗證模式（政府 API 的 SSL 往往有問題）
     context = ssl._create_unverified_context()
     return context
 
@@ -241,9 +240,7 @@ def crawl_cdc_nidss(season_name: Optional[str] = None) -> list[str]:
             
             # 確保有拿到資料陣列
             if isinstance(data, list) and len(data) > 0:
-                # 實務上這類資料為每週更新，我們可以取陣列中的最後一筆（最新一週）來判斷
-                # 這裡為了簡單示範，只要近期 API 有持續吐出資料，我們就將其加入系統中
-                # 你未來也可以擴充邏輯：判斷 latest_record 的人次是否突破「流行閾值」
+                # 目前策略：只要 API 有持續回傳近期資料，即視為該類疾病活躍。
                 
                 if disease_category == "流感":
                     found_diseases.append("流感")
@@ -256,9 +253,7 @@ def crawl_cdc_nidss(season_name: Optional[str] = None) -> list[str]:
         except Exception as e:
             print(f"[WARN] 無法取得 {disease_category} 相關的 API 資料: {e}")
             
-    # 【安全防護機制 (Fallback)】
-    # 如果政府 API 剛好在維護、連線逾時或是無資料，系統也不能因此停擺
-    # 這時才退回到以當前季節做推估的模型
+    # 安全防護機制：若政府 API 維護、逾時或無資料，退回季節性模型推估。
     if not found_diseases:
         print("[WARN] 無法從 API 獲取足夠數據，啟動備用機制，切換回季節性模型預測...")
         season_mapping: dict[str, list[str]] = {
